@@ -1446,8 +1446,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         '  <span>SDD faite ✓</span>',
         '</label>',
         '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">',
-        '  <button id="md-save" class="md-btn primary">⌃S Sauver</button>',
-        '  <button id="md-toggle" class="md-btn">👁 Aperçu</button>',
+        '  <button id="md-save" class="md-btn primary">Sauver</button>',
+        '  <button id="md-toggle" class="md-btn">Aperçu</button>',
         '  <span id="md-status" style="margin-left:auto;font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)"></span>',
         '</div>',
         '<textarea id="md-area" spellcheck="false" style="' +
@@ -1456,15 +1456,15 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
           'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;' +
           'font-size:var(--fs-notes);line-height:1.6;color:var(--text);outline:none;' +
           'background:#fafcff;transition:border-color var(--transition),box-shadow var(--transition)' +
-        '" placeholder="Notes Markdown..."></textarea>',
+        '" placeholder="Notes"></textarea>',
         '<div id="md-prev" style="display:none;margin-top:10px;padding:14px;' +
           'border:1px solid var(--border);border-radius:var(--r-sm);background:#fafcff;min-height:60px"></div>',
         '<div class="shortcuts-hint">',
-        '  <kbd>Ctrl/⌘ S</kbd> Sauver &nbsp;',
-        '  <kbd>Ctrl/⌘ B</kbd> Gras &nbsp;',
-        '  <kbd>Ctrl/⌘ I</kbd> Italique &nbsp;',
-        '  <kbd>Ctrl/⌘ U</kbd> Souligné &nbsp;',
-        '  <kbd>Tab</kbd> / <kbd>⇧ Tab</kbd> Indent',
+        '',
+        '',
+        '',
+        '',
+        '',
         '</div>',
       ].join('\n');
       const noteCard = card('Suivi & notes', '#4f46e5', notesHTML, 'notes');
