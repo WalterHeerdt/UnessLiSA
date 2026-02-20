@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      7
+// @version      7.1
 // @description  Liste SDD + redesign pages + case "faite" + notes Markdown (local) + sticky + raccourcis (Ctrl/Cmd+S,B,I,U) + Tab/Shift+Tab + encarts minimisables (persistant) + tailles de police via constantes + FIX mobile (media query sans var()) + Cloud sync (username+PIN via Firebase) + auto-update GitHub + bouton déconnexion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -1351,7 +1351,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <span class="sep">›</span>
       <strong style="color:var(--text2);font-weight:var(--fw-semi)">${escapeHtml(sddNum)}</strong>
       <span class="bc-spacer"></span>
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
     document.body.appendChild(bc);
 
     // Header
