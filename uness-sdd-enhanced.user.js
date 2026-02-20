@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      6.1
+// @version      6.2
 // @description  Liste SDD + redesign pages + case "faite" + notes Markdown (local) + sticky + raccourcis (Ctrl/Cmd+S,B,I,U) + Tab/Shift+Tab + encarts minimisables (persistant) + tailles de police via constantes + FIX mobile (media query sans var()) + Cloud sync (username+PIN via Firebase) + auto-update GitHub
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -1010,7 +1010,7 @@
         grid-template-columns:var(--notes-col) minmax(0,1fr);
         gap:16px;align-items:start;
       }
-      #sdd-follow{position:sticky;top:${CFG.stickyTop}px;max-height:calc(100vh - ${CFG.stickyTop + 20}px);overflow-y:auto}
+      #sdd-follow{position:sticky;top:${CFG.stickyTop}px}
 
       /* ── Cards ── */
       .sc{
