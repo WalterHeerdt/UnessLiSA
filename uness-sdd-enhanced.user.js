@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      6.5
+// @version      6.6
 // @description  Liste SDD + redesign pages + case "faite" + notes Markdown (local) + sticky + raccourcis (Ctrl/Cmd+S,B,I,U) + Tab/Shift+Tab + encarts minimisables (persistant) + tailles de police via constantes + FIX mobile (media query sans var()) + Cloud sync (username+PIN via Firebase) + auto-update GitHub
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -646,7 +646,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     return state;
   };
 
-  console.log('%c[UNESS-SDD] 🛠 Debug dispo: debugCloud() | debugCloudReset() | debugLocalState()', 
+  console.log('%c[UNESS-SDD] 🛠 Debug dispo: debugCloud() | debugCloudReset() | debugLocalState()',
     'background:#4f46e5;color:#fff;padding:4px 8px;border-radius:6px;font-weight:bold');
 
   // ══════════════════════════════════════════════════════════════════════════
