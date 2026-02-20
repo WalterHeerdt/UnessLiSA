@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      6.6
-// @description  Liste SDD + redesign pages + case "faite" + notes Markdown (local) + sticky + raccourcis (Ctrl/Cmd+S,B,I,U) + Tab/Shift+Tab + encarts minimisables (persistant) + tailles de police via constantes + FIX mobile (media query sans var()) + Cloud sync (username+PIN via Firebase) + auto-update GitHub
+// @version      7
+// @description  Liste SDD + redesign pages + case "faite" + notes Markdown (local) + sticky + raccourcis (Ctrl/Cmd+S,B,I,U) + Tab/Shift+Tab + encarts minimisables (persistant) + tailles de police via constantes + FIX mobile (media query sans var()) + Cloud sync (username+PIN via Firebase) + auto-update GitHub + bouton déconnexion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
 // @match        https://livret.uness.fr/lisa/2025/Cat*gorie:Situation_de_d*part
@@ -30,11 +30,8 @@
 const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérologie","Maladies Infectieuses et Tropicales"],3:["Chirurgie Viscérale et Digestive","Médecine d'Urgence"],4:["Médecine d'Urgence","Chirurgie Viscérale et Digestive"],5:["Hépato-Gastro-Entérologie"],6:["Hépato-Gastro-Entérologie","Médecine Interne Immunologie"],7:["Hépato-Gastro-Entérologie","MPR"],8:["Hépato-Gastro-Entérologie","Oncologie"],9:["Chirurgie Viscérale et Digestive"],10:["Médecine d'Urgence","Hépato-Gastro-Entérologie"],11:["Pédiatrie"],12:["Médecine d'Urgence","Gériatrie"],13:["Médecine d'Urgence","Hépato-Gastro-Entérologie"],14:["Médecine d'Urgence","Hépato-Gastro-Entérologie"],15:["Médecine Vasculaire","Médecine Cardiovasculaire"],16:["Médecine Interne Immunologie","Hématologie"],17:["Médecine Interne Immunologie","Oncologie"],18:["Médecine Cardiovasculaire"],19:["Médecine Vasculaire","Chirurgie Vasculaire"],20:["Pneumologie","Médecine d'Urgence"],21:["Médecine Interne Immunologie"],22:["Néphrologie","Médecine d'Urgence"],23:["Urologie"],24:["Endocrinologie - Diabétologie - Nutrition","Gynécologie Médicale"],25:["Endocrinologie - Diabétologie - Nutrition"],26:["Pédiatrie","Endocrinologie - Diabétologie - Nutrition"],27:["Gériatrie","Médecine d'Urgence"],28:["Médecine Intensive Réanimation","Neurologie"],29:["Neurologie"],30:["Endocrinologie - Diabétologie - Nutrition","Gériatrie"],31:["Gériatrie","Neurologie"],32:["Pédiatrie","Médecine d'Urgence"],33:["Gynécologie Médicale"],34:["Anesthésie Réanimation"],35:["MPR","Rhumatologie"],36:["Rhumatologie","MPR"],37:["Pédiatrie","Dermatologie Vénérologie"],38:["Médecine d'Urgence","Médecine Intensive Réanimation"],39:["Pédiatrie"],40:["Gynécologie Médicale","Endocrinologie - Diabétologie - Nutrition"],41:["Endocrinologie - Diabétologie - Nutrition","Chirurgie Plastique"],42:["Médecine Cardiovasculaire"],43:["Médecine d'Urgence","Médecine Cardiovasculaire"],44:["Médecine d'Urgence","Maladies Infectieuses et Tropicales"],45:["Médecine d'Urgence","Médecine Intensive Réanimation"],46:["Pédiatrie","Médecine d'Urgence"],47:["Hépato-Gastro-Entérologie"],48:["Pédiatrie"],49:["Médecine d'Urgence"],50:["Médecine d'Urgence","Neurologie"],51:["Endocrinologie - Diabétologie - Nutrition"],52:["ORL - CCF","Hépato-Gastro-Entérologie"],53:["Gynécologie Obstétrique"],54:["Médecine Interne Immunologie","Néphrologie"],55:["Pédiatrie","Hématologie"],56:["Rhumatologie"],57:["Endocrinologie - Diabétologie - Nutrition"],58:["Hématologie","Médecine Interne Immunologie"],59:["Hématologie"],60:["Médecine d'Urgence","Anesthésie Réanimation"],61:["Endocrinologie - Diabétologie - Nutrition","Néphrologie"],62:["ORL - CCF","Neurologie"],63:["Urologie"],64:["ORL - CCF","Neurologie"],65:["Chirurgie Orthopédique et Traumatologique","Rhumatologie"],66:["Neurologie","MPR"],67:["Rhumatologie"],68:["Chirurgie Orthopédique et Traumatologique","Pédiatrie"],69:["Médecine Vasculaire","Chirurgie Vasculaire"],70:["Rhumatologie","Chirurgie Orthopédique et Traumatologique"],71:["Chirurgie Orthopédique et Traumatologique","Médecine d'Urgence"],72:["Rhumatologie","Chirurgie Orthopédique et Traumatologique"],73:["Neurologie"],74:["Neurologie"],75:["Chirurgie Orthopédique et Traumatologique"],76:["Médecine Vasculaire"],77:["Médecine Interne Immunologie","Rhumatologie"],78:["Dermatologie Vénérologie"],79:["Endocrinologie - Diabétologie - Nutrition","Gynécologie Médicale"],80:["Dermatologie Vénérologie"],81:["Dermatologie Vénérologie"],82:["Dermatologie Vénérologie"],83:["Chirurgie Plastique"],84:["Dermatologie Vénérologie"],85:["Dermatologie Vénérologie"],86:["Gériatrie","MPR"],87:["Médecine d'Urgence","Maladies Infectieuses et Tropicales"],88:["Dermatologie Vénérologie","Allergologie"],89:["Hématologie","Médecine Interne Immunologie"],90:["Pédiatrie","Dermatologie Vénérologie"],91:["Dermatologie Vénérologie","ORL - CCF"],92:["Dermatologie Vénérologie","Médecine Vasculaire"],93:["Dermatologie Vénérologie","Maladies Infectieuses et Tropicales"],94:["Gynécologie Médicale"],95:["Hépato-Gastro-Entérologie","Urologie"],96:["Urologie","Maladies Infectieuses et Tropicales"],97:["Urologie","Médecine d'Urgence"],98:["Gynécologie Obstétrique"],99:["Gynécologie Obstétrique","Urologie"],100:["Urologie","Médecine d'Urgence"],101:["Urologie","Maladies Infectieuses et Tropicales"],102:["Urologie"],103:["Urologie","Gériatrie"],104:["Gynécologie Médicale"],105:["Gynécologie Obstétrique","Urologie"],106:["Gynécologie Obstétrique","Oncologie"],107:["Gynécologie Obstétrique","Urologie"],108:["Urologie"],109:["Gynécologie Obstétrique"],110:["Gynécologie Obstétrique","Anesthésie Réanimation"],111:["Gynécologie Obstétrique","Médecine d'Urgence"],112:["Gynécologie Médicale","Gynécologie Obstétrique"],113:["Pédiatrie","Endocrinologie - Diabétologie - Nutrition"],114:["Psychiatrie","Médecine d'Urgence"],115:["Pédiatrie","Neurologie"],116:["Psychiatrie"],117:["Psychiatrie","Gériatrie"],118:["Neurologie","Médecine d'Urgence"],119:["Gériatrie","Médecine d'Urgence"],120:["Neurologie","Médecine d'Urgence"],121:["Neurologie","Médecine d'Urgence"],122:["Psychiatrie"],123:["Psychiatrie"],124:["Psychiatrie"],125:["Psychiatrie"],126:["Neurologie"],127:["ORL - CCF","Neurologie"],128:["Neurologie"],129:["Psychiatrie","Neurologie"],130:["Neurologie","ORL - CCF"],131:["Gériatrie","Neurologie"],132:["Psychiatrie","Endocrinologie - Diabétologie - Nutrition"],133:["Pédiatrie","Psychiatrie"],134:["ORL - CCF","Neurologie"],135:["Psychiatrie","Neurologie"],136:["Psychiatrie"],137:["Psychiatrie","Gynécologie Obstétrique"],138:["Ophtalmologie","Neurologie"],139:["Ophtalmologie","Chirurgie Plastique"],140:["ORL - CCF"],141:["Ophtalmologie"],142:["ORL - CCF","Médecine d'Urgence"],143:["Ophtalmologie","Neurologie"],144:["ORL - CCF","CMF"],145:["ORL - CCF"],146:["ORL - CCF"],147:["ORL - CCF","Médecine d'Urgence"],148:["Endocrinologie - Diabétologie - Nutrition","Chirurgie Viscérale et Digestive"],149:["Médecine d'Urgence","ORL - CCF"],150:["CMF","Chirurgie Orale"],151:["ORL - CCF","Médecine d'Urgence"],152:["Ophtalmologie","Médecine d'Urgence"],153:["ORL - CCF"],154:["ORL - CCF"],155:["ORL - CCF","Allergologie"],156:["ORL - CCF"],157:["Ophtalmologie","Pédiatrie"],158:["ORL - CCF","CMF"],159:["Médecine Cardiovasculaire","Médecine d'Urgence"],160:["Médecine d'Urgence","Médecine Intensive Réanimation"],161:["Médecine d'Urgence","Médecine Cardiovasculaire"],162:["Médecine d'Urgence","Pneumologie"],163:["Pneumologie","Maladies Infectieuses et Tropicales"],164:["Gynécologie Médicale","Oncologie"],165:["Médecine Cardiovasculaire","Médecine d'Urgence"],166:["Médecine d'Urgence","Médecine Cardiovasculaire"],167:["Pneumologie","Médecine d'Urgence"],168:["Médecine d'Urgence","Chirurgie Plastique"],169:["Médecine d'Urgence","Maladies Infectieuses et Tropicales"],170:["Médecine d'Urgence","Chirurgie Plastique"],171:["Médecine d'Urgence","Chirurgie Viscérale et Digestive"],172:["Médecine d'Urgence","Neurochirurgie"],173:["Médecine d'Urgence","Chirurgie Orthopédique et Traumatologique"],174:["Médecine d'Urgence","CMF"],175:["Médecine d'Urgence","Neurochirurgie"],176:["Médecine d'Urgence","Médecine Intensive Réanimation"],177:["Médecine d'Urgence","Chirurgie Thoracique et Cardiovasculaire"],178:["Radiologie et Imagerie Médicale"],179:["Anatomie et Cytologie Pathologiques"],180:["Anatomie et Cytologie Pathologiques"],181:["Anatomie et Cytologie Pathologiques","Oncologie"],182:["Biologie Médicale","Urologie"],183:["Biologie Médicale","Neurologie"],184:["ORL - CCF"],185:["Médecine Cardiovasculaire"],186:["Médecine Interne Immunologie","Maladies Infectieuses et Tropicales"],187:["Biologie Médicale","Maladies Infectieuses et Tropicales"],188:["Maladies Infectieuses et Tropicales","Biologie Médicale"],189:["Biologie Médicale","Urologie"],190:["Biologie Médicale","Maladies Infectieuses et Tropicales"],191:["Biologie Médicale","Hépato-Gastro-Entérologie"],192:["Médecine Intensive Réanimation","Biologie Médicale"],193:["Biologie Médicale","Hématologie"],194:["Endocrinologie - Diabétologie - Nutrition"],195:["Médecine Cardiovasculaire","Endocrinologie - Diabétologie - Nutrition"],196:["Biologie Médicale","Néphrologie"],197:["Néphrologie","Biologie Médicale"],198:["Hépato-Gastro-Entérologie"],199:["Néphrologie"],200:["Endocrinologie - Diabétologie - Nutrition","Néphrologie"],201:["Néphrologie"],202:["Néphrologie","Médecine Intensive Réanimation"],203:["Allergologie","Dermatologie Vénérologie"],204:["Médecine Cardiovasculaire","Médecine d'Urgence"],205:["Hépato-Gastro-Entérologie","Médecine d'Urgence"],206:["Hépato-Gastro-Entérologie"],207:["Hématologie","Médecine Interne Immunologie"],208:["Endocrinologie - Diabétologie - Nutrition","Médecine d'Urgence"],209:["Endocrinologie - Diabétologie - Nutrition","Médecine d'Urgence"],210:["Hématologie","Médecine Interne Immunologie"],211:["Hépato-Gastro-Entérologie","Néphrologie"],212:["Néphrologie"],213:["Hématologie"],214:["Hématologie"],215:["Hématologie"],216:["Hématologie"],217:["Hématologie"],218:["Hématologie","Hépato-Gastro-Entérologie"],219:["Allergologie","Hématologie"],220:["Hématologie"],221:["Hématologie"],222:["Hématologie"],223:["Hématologie"],224:["Radiologie et Imagerie Médicale","Hépato-Gastro-Entérologie"],225:["Radiologie et Imagerie Médicale","ORL - CCF"],226:["Radiologie et Imagerie Médicale","Neurologie"],227:["Radiologie et Imagerie Médicale","Neurochirurgie"],228:["Radiologie et Imagerie Médicale","Chirurgie Orthopédique et Traumatologique"],229:["Radiologie et Imagerie Médicale","Gynécologie Obstétrique"],230:["Radiologie et Imagerie Médicale","Médecine Cardiovasculaire"],231:["Radiologie et Imagerie Médicale"],232:["Radiologie et Imagerie Médicale"],233:["Radiologie et Imagerie Médicale"],234:["Maladies Infectieuses et Tropicales","Biologie Médicale"],235:["Maladies Infectieuses et Tropicales","Santé Publique"],236:["Biologie Médicale","Maladies Infectieuses et Tropicales"],237:["Médecine d'Urgence","Médecine Légale et Expertise médicale"],238:["Hépato-Gastro-Entérologie","Pneumologie"],239:["Anesthésie Réanimation"],240:["Psychiatrie"],241:["Médecine d'Urgence","Psychiatrie"],242:["Pneumologie","Addictologie"],243:["Chirurgie Orthopédique et Traumatologique"],244:["Psychiatrie","Médecine d'Urgence"],245:["MPR","Chirurgie Orthopédique et Traumatologique"],246:["Médecine Générale","Santé Publique"],247:["MPR"],248:["Médecine Cardiovasculaire","Hématologie"],249:["Rhumatologie"],250:["Anesthésie Réanimation"],251:["Médecine Interne Immunologie"],252:["Médecine Cardiovasculaire"],253:["Médecine Cardiovasculaire","Néphrologie"],254:["Oncologie"],255:["Maladies Infectieuses et Tropicales"],256:["Psychiatrie"],257:["Gynécologie Médicale"],258:["Anesthésie Réanimation"],259:["Médecine d'Urgence","Anesthésie Réanimation"],260:["MPR","Rhumatologie"],261:["Pédiatrie","Anesthésie Réanimation"],262:["Maladies Infectieuses et Tropicales","Médecine d'Urgence"],263:["Dermatologie Vénérologie","Maladies Infectieuses et Tropicales"],264:["Médecine Interne Immunologie","Néphrologie"],265:["Pédiatrie"],266:["Gériatrie","Médecine Interne Immunologie"],267:["Médecine Interne Immunologie","Gériatrie"],268:["Gynécologie Obstétrique"],269:["Psychiatrie"],270:["Endocrinologie - Diabétologie - Nutrition"],271:["Anesthésie Réanimation","Médecine Intensive Réanimation"],272:["Anesthésie Réanimation","Hématologie"],273:["Pédiatrie","Gynécologie Obstétrique"],274:["Maladies Infectieuses et Tropicales","Pneumologie"],275:["Hématologie"],276:["Gériatrie","MPR"],277:["Rhumatologie","MPR"],278:["Gynécologie Médicale","Endocrinologie - Diabétologie - Nutrition"],279:["Médecine Interne Immunologie"],280:["Endocrinologie - Diabétologie - Nutrition"],281:["Endocrinologie - Diabétologie - Nutrition"],282:["Médecine Cardiovasculaire"],283:["Pneumologie"],284:["Endocrinologie - Diabétologie - Nutrition"],285:["Médecine Cardiovasculaire"],286:["Pneumologie"],287:["Médecine Cardiovasculaire"],288:["Psychiatrie"],289:["Neurologie"],290:["Néphrologie"],291:["Médecine Interne Immunologie","Maladies Infectieuses et Tropicales"],292:["Psychiatrie"],293:["Psychiatrie"],294:["Gynécologie Médicale"],295:["Gériatrie"],296:["Pédiatrie"],297:["Oncologie"],298:["Neurologie","Gériatrie"],299:["Allergologie"],300:["Anesthésie Réanimation"],301:["Maladies Infectieuses et Tropicales","Pneumologie"],302:["Maladies Infectieuses et Tropicales"],303:["Santé Publique","Oncologie"],304:["Gynécologie Obstétrique","Endocrinologie - Diabétologie - Nutrition"],305:["Maladies Infectieuses et Tropicales","Gynécologie Médicale"],306:["Rhumatologie","Gériatrie"],307:["Gynécologie Obstétrique","Génétique Médicale"],308:["Pédiatrie","Santé Publique"],309:["Psychiatrie","Médecine d'Urgence"],310:["Maladies Infectieuses et Tropicales","Santé Publique"],311:["Santé Publique","Maladies Infectieuses et Tropicales"],312:["Gynécologie Obstétrique"],313:["Santé Publique"],314:["Santé Publique","Pneumologie"],315:["Médecine et Santé au Travail"],316:["Médecine et Santé au Travail","MPR"],317:["Gynécologie Médicale","Santé Publique"],318:["Pédiatrie","Santé Publique"],319:["Santé Publique","Endocrinologie - Diabétologie - Nutrition"],320:["Santé Publique","Médecine Cardiovasculaire"],321:["Pédiatrie","Médecine Légale et Expertise médicale"],322:["Santé Publique","Maladies Infectieuses et Tropicales"],323:["Pédiatrie","Santé Publique"],324:["Endocrinologie - Diabétologie - Nutrition","Santé Publique"],325:["Santé Publique","Pédiatrie"],326:["Médecine et Santé au Travail","Médecine d'Urgence"],327:["Oncologie","Médecine Interne Immunologie"],328:["Médecine Interne Immunologie"],329:["Santé Publique","Médecine Légale et Expertise médicale"],330:["Gériatrie","Santé Publique"],331:["Médecine Légale et Expertise médicale"],332:["Gynécologie Obstétrique"],333:["Médecine Légale et Expertise médicale","Médecine d'Urgence"],334:["Santé Publique","Médecine Interne Immunologie"],335:["Médecine Cardiovasculaire"],336:["Maladies Infectieuses et Tropicales","Médecine d'Urgence"],337:["Oncologie","Médecine Interne Immunologie"],338:["Santé Publique"],339:["Médecine et Santé au Travail"],340:["Médecine d'Urgence","Médecine Intensive Réanimation"],341:["Psychiatrie","Médecine d'Urgence"],342:["Santé Publique"],343:["Médecine Légale et Expertise médicale","Santé Publique"],344:["Psychiatrie","Médecine et Santé au Travail"],345:["MPR","Santé Publique"],346:["Santé Publique","Médecine d'Urgence"],347:["Santé Publique"],348:["Médecine Interne Immunologie"],349:["Psychiatrie"],350:["Médecine Légale et Expertise médicale","Gynécologie Obstétrique"],351:["Médecine Légale et Expertise médicale","Médecine d'Urgence"],352:["Santé Publique"],353:["MPR","Médecine Cardiovasculaire"],354:["Santé Publique"],355:["Santé Publique","Gériatrie"],356:["Anesthésie Réanimation"]};
 
   const CFG = {
-    // Police (Google Fonts)
     fontFamily: 'Inter',
     fontWeights: [400, 500, 600, 700, 800],
-
-    // Tailles (px) → variables CSS
     fsBase:    16,
     fsSmall:   14,
     fsTiny:    12,
@@ -48,39 +45,25 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     fsChip:    14,
     fsTable:   15,
     fsNotes:   13,
-
-    // Weights
     fwBase:     400,
     fwMedium:   500,
     fwSemibold: 600,
     fwBold:     700,
     fwHeavy:    800,
-
-    // Layout
-    notesColWidth:     340,   // px colonne notes (desktop) — réduit pour plus d'espace contenu
-    railsMin:           14,   // px padding min
-    railsMax:           48,   // px padding max
-    breakpointOneCol:  980,   // px → 1-col (utilisé en dur dans @media)
-    stickyTop:          14,   // px
-
-    // Cache liste
+    notesColWidth:     340,
+    railsMin:           14,
+    railsMax:           48,
+    breakpointOneCol:  980,
+    stickyTop:          14,
     cacheTTLms: 48 * 60 * 60 * 1000,
-
-    // Notes
-    autosaveDelay: 250,   // ms
+    autosaveDelay: 250,
     indentSpaces:    2,
-
-    // ──────────────────────────────────────────────────────────────────────
-    // CLOUD SYNC — Firebase (Email/Password Auth + Firestore REST)
-    // ──────────────────────────────────────────────────────────────────────
     cloud: {
       enabled: true,
       usernameKey: 'uness_cloud_user_v1',
       pinKey:      'uness_cloud_pin_v1',
-
       apiKey:    'AIzaSyAHyhowmrjXjGyJKbPibpeevBluc0qFtzg',
       projectId: 'uneisa-26e34',
-
       pushDebounceMs: 900,
     },
   };
@@ -200,46 +183,31 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   // ══════════════════════════════════════════════════════════════════════════
   function mdToHtml(md) {
     let s = escapeHtml(md || '');
-
-    // underline: __text__
     s = s.replace(/__([^_\n]+)__/g, '<u>$1</u>');
-
-    // inline code
     s = s.replace(/`([^`\n]+)`/g,
       '<code style="background:#f1f5f9;padding:2px 6px;border-radius:6px;border:1px solid #e2e8f0;font-size:.9em">$1</code>'
     );
-
-    // bold & italic (ordre important : ** avant *)
     s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-
-    // liens [txt](url)
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--ac);text-decoration:none;font-weight:var(--fw-semi)">$1</a>'
     );
-
-    // headings
     s = s.replace(/^######\s(.+)$/gm, '<h6 style="margin:.65rem 0 .3rem;font-size:var(--fs-small)">$1</h6>');
     s = s.replace(/^#####\s(.+)$/gm,  '<h5 style="margin:.75rem 0 .35rem;font-size:var(--fs-h4)">$1</h5>');
     s = s.replace(/^####\s(.+)$/gm,   '<h4 style="margin:.85rem 0 .4rem;font-size:var(--fs-h3)">$1</h4>');
     s = s.replace(/^###\s(.+)$/gm,    '<h3 style="margin:.95rem 0 .45rem;font-size:var(--fs-h2)">$1</h3>');
     s = s.replace(/^##\s(.+)$/gm,     '<h2 style="margin:1.05rem 0 .5rem;font-size:var(--fs-h1)">$1</h2>');
     s = s.replace(/^#\s(.+)$/gm,      '<h1 style="margin:1.15rem 0 .55rem;font-size:var(--fs-title);font-weight:var(--fw-heavy)">$1</h1>');
-
-    // listes (- ou *)
     s = s.replace(/^(?:- |\* )(.*)$/gm, '<li>$1</li>');
     s = s.replace(/(<li>.*<\/li>\n?)+/g, m =>
       `<ul style="margin:.45rem 0 .9rem 1.25rem;list-style:disc;color:var(--text2);line-height:1.65;font-size:var(--fs-base)">${m}</ul>`
     );
-
-    // paragraphes
     s = s.split(/\n{2,}/).map(block => {
       const t = block.trim();
       if (!t) return '';
       if (t.startsWith('<h') || t.startsWith('<ul')) return block;
       return `<p style="margin:.55rem 0;color:var(--text2);line-height:1.7;font-size:var(--fs-base)">${block.replace(/\n/g, '<br>')}</p>`;
     }).join('');
-
     return s || '<p style="color:var(--muted);margin:0;font-style:italic">Aucune note.</p>';
   }
 
@@ -287,10 +255,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  // Safe tags getter (SDD_TAGS est optionnel)
   function tagsForNum(n) {
     try {
-      if (typeof SDD_TAGS !== 'undefined' && SDD_TAGS?.[n]) return SDD_TAGS[n]; // eslint-disable-line no-undef
+      if (typeof SDD_TAGS !== 'undefined' && SDD_TAGS?.[n]) return SDD_TAGS[n];
     } catch (_) {}
     return [];
   }
@@ -350,10 +317,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       return { uid: j.localId, idToken: j.idToken };
     };
 
-    // Toujours tenter le sign-up d'abord — si le compte existe déjà,
-    // Firebase retourne EMAIL_EXISTS → on tente alors le sign-in.
-    // C'est plus fiable que sign-in → fallback sign-up car Firebase
-    // a rendu opaque INVALID_LOGIN_CREDENTIALS (regroupe compte inexistant ET mauvais mdp).
     console.log('[UNESS-CLOUD] Tentative sign-up:', email);
     try {
       const j = await firebasePost(
@@ -365,7 +328,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     } catch (signUpErr) {
       const msg = signUpErr.message || '';
       console.log('[UNESS-CLOUD] Sign-up échoué:', msg);
-      // EMAIL_EXISTS = compte déjà présent → on se connecte
       if (msg.includes('EMAIL_EXISTS') || msg.includes('DUPLICATE')) {
         console.log('[UNESS-CLOUD] Compte existant, tentative sign-in...');
         try {
@@ -431,7 +393,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       setCloudPin(pin);
     } else if (pin.length < 6) {
-      // PIN déjà stocké mais trop court (saisi avant cette vérif) → le réinitialiser
       setCloudPin('');
       pin = '';
       alert('⚠️ Ton PIN stocké est trop court (min. 6 car.). Saisis-en un nouveau.');
@@ -463,7 +424,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     });
   }
 
-  // Firestore → valeur JS
   function fsValueToJS(fv) {
     if (fv == null) return null;
     if (fv.stringValue  != null) return fv.stringValue;
@@ -473,7 +433,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     return null;
   }
 
-  // JS → valeur Firestore
   function jsToFsValue(v) {
     if (typeof v === 'boolean')                       return { booleanValue: v };
     if (typeof v === 'number' && Number.isFinite(v))  return { integerValue: String(Math.trunc(v)) };
@@ -529,7 +488,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // DEBUG CONSOLE — tape debugCloud() dans la console du navigateur
+  // DEBUG CONSOLE
   // ══════════════════════════════════════════════════════════════════════════
   window.debugCloud = async function () {
     const log  = (emoji, msg, data) => console.log(`${emoji} [UNESS-CLOUD] ${msg}`, data ?? '');
@@ -537,8 +496,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     const err  = (msg, e)           => console.error(`❌ [UNESS-CLOUD] ${msg}`, e ?? '');
 
     log('🔍', '=== DEBUG FIREBASE START ===');
-
-    // 1. Config
     log('⚙️ ', 'Config cloud:', {
       enabled:   CFG.cloud.enabled,
       apiKey:    CFG.cloud.apiKey?.slice(0, 12) + '...',
@@ -547,13 +504,11 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     log('✅', 'cloudEnabled():', cloudEnabled());
     if (!cloudEnabled()) { warn('Cloud désactivé ou config manquante. Arrêt.'); return; }
 
-    // 2. Credentials stockés
     const username = getCloudUsername();
     const pin      = getCloudPin();
     log('👤', 'Username stocké:', username || '(vide)');
     log('🔑', 'PIN stocké:', pin ? '***' + pin.slice(-1) : '(vide)');
 
-    // 3. Token actuel
     const tok = loadToken();
     log('🎟️ ', 'Token actuel:', {
       uid:       tok?.uid || '(aucun)',
@@ -562,18 +517,13 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       expired:   tok?.expiresAt ? Date.now() > tok.expiresAt : true,
     });
 
-    // 4. Refresh token
     log('🔄', 'Test refresh token...');
     try {
       const refreshed = await cloudRefreshIfNeeded();
-      if (refreshed?.idToken) {
-        log('✅', 'Refresh OK — uid:', refreshed.uid);
-      } else {
-        warn('Refresh retourné vide — pas de refreshToken valide.');
-      }
+      if (refreshed?.idToken) log('✅', 'Refresh OK — uid:', refreshed.uid);
+      else warn('Refresh retourné vide — pas de refreshToken valide.');
     } catch (e) { err('Refresh échoué:', e); }
 
-    // 5. Sign-in test (si username+PIN disponibles)
     if (username && pin) {
       log('🔐', 'Test sign-in Firebase...');
       try {
@@ -584,30 +534,23 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       warn('Username ou PIN manquant — sign-in non testé.');
     }
 
-    // 6. Session complète
     log('🧩', 'Test cloudEnsureSession()...');
     try {
       const session = await cloudEnsureSession();
-      if (session?.idToken) {
-        log('✅', 'Session OK — uid:', session.uid);
-      } else {
-        warn('Session retournée nulle (user a peut-être annulé le prompt).');
-      }
+      if (session?.idToken) log('✅', 'Session OK — uid:', session.uid);
+      else warn('Session retournée nulle (user a peut-être annulé le prompt).');
     } catch (e) { err('cloudEnsureSession() échoué:', e); }
 
-    // 7. Firestore PULL
     log('📥', 'Test cloudPull() (lecture Firestore)...');
     try {
       const data = await cloudPull();
-      if (data === null) {
-        log('ℹ️ ', 'Pull OK mais document inexistant (404) — normal au 1er usage.');
-      } else {
+      if (data === null) log('ℹ️ ', 'Pull OK mais document inexistant (404) — normal au 1er usage.');
+      else {
         const keys = Object.keys(data);
         log('✅', `Pull OK — ${keys.length} clés récupérées:`, keys.slice(0, 10));
       }
     } catch (e) { err('cloudPull() échoué:', e); }
 
-    // 8. Firestore PUSH (test avec données locales)
     log('📤', 'Test cloudPush() (écriture Firestore)...');
     try {
       const local = exportLocalState();
@@ -617,12 +560,11 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       log('✅', 'Push OK');
     } catch (e) { err('cloudPush() échoué:', e); }
 
-    // 9. Données locales
     log('💾', 'État local (Tampermonkey):');
     const allKeys = GM_listValues();
-    const doneKeys    = allKeys.filter(k => k.startsWith('uness_sdd_done_v1_'));
-    const notesKeys   = allKeys.filter(k => k.startsWith('uness_sdd_notes_v1_'));
-    const collapseKeys= allKeys.filter(k => k.startsWith('uness_sdd_collapse_v1_'));
+    const doneKeys     = allKeys.filter(k => k.startsWith('uness_sdd_done_v1_'));
+    const notesKeys    = allKeys.filter(k => k.startsWith('uness_sdd_notes_v1_'));
+    const collapseKeys = allKeys.filter(k => k.startsWith('uness_sdd_collapse_v1_'));
     log('📊', `  done: ${doneKeys.length}, notes: ${notesKeys.length}, collapse: ${collapseKeys.length}`);
     const doneSamples = doneKeys.filter(k => GM_getValue(k, false)).slice(0, 5);
     if (doneSamples.length) log('✅', '  SDD faites (sample):', doneSamples.map(k => k.replace('uness_sdd_done_v1_', '')));
@@ -646,7 +588,42 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     return state;
   };
 
-  console.log('%c[UNESS-SDD] 🛠 Debug dispo: debugCloud() | debugCloudReset() | debugLocalState()',
+  // ══════════════════════════════════════════════════════════════════════════
+  // DÉCONNEXION CLOUD
+  // ══════════════════════════════════════════════════════════════════════════
+  window.cloudDisconnect = function () {
+    setCloudUsername('');
+    setCloudPin('');
+    saveToken({});
+    console.log('🔓 [UNESS-CLOUD] Déconnecté.');
+    location.reload();
+  };
+
+  // CSS commun du bouton logout (injecté dans les deux pages)
+  const LOGOUT_BTN_CSS = `
+    .btn-logout {
+      padding: 4px 8px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--muted);
+      font-size: var(--fs-tiny);
+      font-family: inherit;
+      cursor: pointer;
+      opacity: .45;
+      transition: all var(--transition);
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .btn-logout:hover {
+      opacity: 1;
+      color: var(--danger);
+      border-color: #fca5a5;
+      background: var(--danger-light);
+    }
+  `;
+
+  console.log('%c[UNESS-SDD] 🛠 Debug dispo: debugCloud() | debugCloudReset() | debugLocalState() | cloudDisconnect()',
     'background:#4f46e5;color:#fff;padding:4px 8px;border-radius:6px;font-weight:bold');
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -822,7 +799,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         padding:10px 40px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
       }
 
-      /* Champ de recherche */
       .search-wrap{position:relative;flex:1;min-width:220px;max-width:400px}
       .search-wrap svg{
         position:absolute;left:10px;top:50%;transform:translateY(-50%);
@@ -837,7 +813,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       #search::placeholder{color:var(--muted)}
       #search:focus{border-color:var(--ac);box-shadow:var(--sh-focus)}
 
-      /* Selects */
       select{
         padding:9px 12px;background:#fff;border:1px solid var(--border);
         border-radius:var(--r);color:var(--text2);font-size:var(--fs-small);
@@ -846,7 +821,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       select:focus{border-color:var(--ac);box-shadow:var(--sh-focus)}
 
-      /* Boutons tri */
       .sort-btns{display:flex;gap:6px}
       .sort-btns button{
         padding:8px 12px;background:#fff;border:1px solid var(--border);
@@ -908,7 +882,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       .row-arr{color:var(--border2);font-size:17px;justify-self:end;transition:color var(--transition)}
       .row:hover .row-arr{color:var(--ac)}
 
-      /* Checkbox "faite" */
       .row-ck{
         width:26px;height:26px;border-radius:var(--r-sm);
         border:1.5px solid var(--border2);
@@ -932,6 +905,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       .no-results span{font-size:32px;display:block;margin-bottom:12px}
 
+      /* ── Bouton logout ── */
+      ${LOGOUT_BTN_CSS}
+
       /* ── Responsive ── */
       @media(max-width:640px){
         header,.ctrl,main{padding-left:14px;padding-right:14px}
@@ -948,7 +924,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     hdr.innerHTML = `
       <div class="h-badge">LISA 2025</div>
       <h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1>
-      <a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>`;
+      <a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(hdr);
 
     // Barre de contrôle
@@ -1081,6 +1058,13 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       location.reload();
     });
 
+    // Bouton logout liste
+    document.getElementById('btn-logout')?.addEventListener('click', () => {
+      if (confirm('Se déconnecter du cloud sync ?\n\nUsername et PIN seront effacés localement. Tes données restent sur le cloud.')) {
+        window.cloudDisconnect();
+      }
+    });
+
     // Raccourci "/" pour focus recherche
     document.addEventListener('keydown', e => {
       if (e.key === '/' && document.activeElement?.id !== 'search') {
@@ -1107,7 +1091,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         font-weight:var(--fw-base)!important;overflow-x:hidden!important;
       }
 
-      /* Masquer le chrome MediaWiki */
       #mw-navigation,.p-navbar.not-collapsible,#footer-icons,#footer-places,
       #footer-info,#catlinks,.printfooter,#jump-to-nav,#siteSub,.contentHeader,
       #p-tb,.mw-editsection,#mw-head,#mw-panel{display:none!important}
@@ -1127,6 +1110,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       #sdd-bc a{color:var(--muted);text-decoration:none;font-weight:var(--fw-med);transition:color var(--transition)}
       #sdd-bc a:hover{color:var(--ac)}
       #sdd-bc .sep{color:var(--border2);user-select:none}
+      #sdd-bc .bc-spacer{margin-left:auto}
 
       /* ── Header SDD ── */
       #sdd-top{
@@ -1262,7 +1246,10 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         background:#fff;color:var(--text2);
       }
 
-      /* ── FIX MOBILE: en dur (pas de CSS var()) ── */
+      /* ── Bouton logout ── */
+      ${LOGOUT_BTN_CSS}
+
+      /* ── FIX MOBILE ── */
       @media(max-width:${CFG.breakpointOneCol}px){
         #sdd-bc,#sdd-top{padding-left:14px;padding-right:14px}
         #sdd-body{
@@ -1281,7 +1268,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       if (cloudEnabled()) {
         try { const r = await cloudPull(); if (r) importLocalState(r); } catch (_) {}
       }
-      // Retry jusqu'à ce que les navbox MW soient dans le DOM (max 5s)
       let attempts = 0;
       const tryBuild = () => {
         attempts++;
@@ -1291,7 +1277,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         } else if (attempts < 50) {
           setTimeout(tryBuild, 100);
         } else {
-          // Fallback : afficher la page avec juste le header/styles, sans les tables
           buildSDD();
         }
       };
@@ -1305,7 +1290,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   function buildSDD() {
     const tables = document.querySelectorAll('.navbox table');
     console.log('[UNESS-SDD] buildSDD() tables trouvées:', tables.length);
-    // Ne pas bloquer si pas de tables — on affiche quand même le chrome (header, notes...)
 
     const fullTitle = document.querySelector('#firstHeading')?.textContent?.trim() || document.title;
     const numMatch  = fullTitle.match(/SDD-(\d+)/i);
@@ -1355,7 +1339,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     const att_specifique = parseAttendus(tables[3]);
     const att_stage      = parseAttendus(tables[4]);
 
-    // ── Vider et reconstruire le body ──
     document.body.innerHTML = '';
 
     // Breadcrumb
@@ -1366,7 +1349,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <span class="sep">›</span>
       <a href="/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part">Situations de départ</a>
       <span class="sep">›</span>
-      <strong style="color:var(--text2);font-weight:var(--fw-semi)">${escapeHtml(sddNum)}</strong>`;
+      <strong style="color:var(--text2);font-weight:var(--fw-semi)">${escapeHtml(sddNum)}</strong>
+      <span class="bc-spacer"></span>
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(bc);
 
     // Header
@@ -1381,10 +1366,17 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <a id="sdd-top-back" href="/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part">← Liste SDD</a>`;
     document.body.appendChild(top);
 
+    // Bouton logout breadcrumb SDD
+    document.getElementById('btn-logout-sdd')?.addEventListener('click', () => {
+      if (confirm('Se déconnecter du cloud sync ?\n\nUsername et PIN seront effacés localement. Tes données restent sur le cloud.')) {
+        window.cloudDisconnect();
+      }
+    });
+
     const body = document.createElement('div');
     body.id = 'sdd-body';
 
-    // ── Helper: card collapsible ──
+    // Helper: card collapsible
     function card(title, dotColor, innerHTML, key) {
       const collapsed = (sddN != null && key) ? isCollapsedKey(`sdd_${sddN}_${key}`) : false;
       const div = document.createElement('div');
@@ -1420,7 +1412,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       </tr>`).join('')}</tbody></table>`;
     }
 
-    // ── Colonne droite : contenu ──
+    // Colonne droite : contenu
     const content = document.createElement('div');
     content.style.cssText = 'display:flex;flex-direction:column;gap:16px;min-width:0';
 
@@ -1436,7 +1428,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     if (att_specifique.length) content.appendChild(card('Attendus spécifiques',               '#3b82f6', attTable(att_specifique), 'att_specifique'));
     if (att_stage.length)      content.appendChild(card('Valorisation du stage',              '#f59e0b', attTable(att_stage),      'att_stage'));
 
-    // ── Colonne gauche : notes ──
+    // Colonne gauche : notes
     const follow = document.createElement('div');
     follow.id = 'sdd-follow';
 
@@ -1503,7 +1495,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       saveBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); saveNow(); });
       doneEl.addEventListener('change', () => setDone(sddN, doneEl.checked));
-      // Empêcher le clic sur la checkbox de propager au toggle de la card
       noteCard.querySelector('#done-wrap').addEventListener('click', e => e.stopPropagation());
 
       let autoTimer = null;
@@ -1523,7 +1514,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         if (show) prevEl.innerHTML = mdToHtml(areaEl.value);
       });
 
-      // Raccourcis clavier dans la textarea
       areaEl.addEventListener('keydown', (e) => {
         const mod = e.ctrlKey || e.metaKey;
         if (mod && /^[sS]$/.test(e.key)) { e.preventDefault(); saveNow(); return; }
@@ -1536,7 +1526,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         }
       });
 
-      // Ctrl/Cmd+S global (quand la card notes est active)
       window.addEventListener('keydown', (e) => {
         if (!(e.ctrlKey || e.metaKey) || !/^[sS]$/.test(e.key)) return;
         if (noteCard.contains(document.activeElement) || prevEl.style.display !== 'none') {
@@ -1560,19 +1549,17 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       follow.appendChild(err);
     }
 
-    // Assemblage final
     body.appendChild(follow);
     body.appendChild(content);
     document.body.appendChild(body);
 
-    // ── Gestion du collapse pour toutes les cards ──
+    // Gestion du collapse pour toutes les cards
     document.querySelectorAll('#sdd-body .sc').forEach(sc => {
       const head = sc.querySelector('.sc-head');
       const key  = sc.dataset.key;
       if (!head || !key || sddN == null) return;
 
       head.addEventListener('click', (e) => {
-        // Ne pas toggle si clic sur un élément interactif
         if (e.target.closest('button,input,textarea,select,a,label')) return;
         const collapsed = sc.classList.toggle('collapsed');
         setCollapsedKey(`sdd_${sddN}_${key}`, collapsed);
