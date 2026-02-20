@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      7.2
+// @version      7.3
 // @description  Liste SDD + redesign pages + case "faite" + notes Markdown (local) + sticky + raccourcis (Ctrl/Cmd+S,B,I,U) + Tab/Shift+Tab + encarts minimisables (persistant) + tailles de police via constantes + FIX mobile (media query sans var()) + Cloud sync (username+PIN via Firebase) + auto-update GitHub + bouton déconnexion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -925,7 +925,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <div class="h-badge">LISA 2025</div>
       <h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1>
       <a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(hdr);
 
     // Barre de contrôle
@@ -1085,10 +1085,11 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       @import url('${googleFontLink(CFG.fontFamily, CFG.fontWeights)}');
       ${cssVarsRoot()}
 
+      html{overflow-x:clip!important}
       html,body{
         background:var(--bg)!important;color:var(--text)!important;
         font-family:var(--ff)!important;font-size:var(--fs-base)!important;
-        font-weight:var(--fw-base)!important;overflow-x:hidden!important;
+        font-weight:var(--fw-base)!important;
       }
 
       #mw-navigation,.p-navbar.not-collapsible,#footer-icons,#footer-places,
@@ -1147,12 +1148,17 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         grid-template-columns:var(--notes-col) minmax(0,1fr);
         gap:16px;align-items:start;
       }
-      #sdd-follow{position:sticky;top:${CFG.stickyTop}px}
+      #sdd-follow{
+        position:sticky;
+        top:${CFG.stickyTop}px;
+        max-height:calc(100vh - ${CFG.stickyTop * 2}px);
+        overflow-y:auto;
+      }
 
       /* ── Cards ── */
       .sc{
         background:var(--surface);border:1px solid var(--border);
-        border-radius:var(--r);overflow:hidden;
+        border-radius:var(--r);
         box-shadow:0 1px 3px rgba(0,0,0,.05);
       }
       .sc-head{
@@ -1351,7 +1357,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <span class="sep">›</span>
       <strong style="color:var(--text2);font-weight:var(--fw-semi)">${escapeHtml(sddNum)}</strong>
       <span class="bc-spacer"></span>
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(bc);
 
     // Header
@@ -1437,11 +1443,11 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       const notesHTML = [
         '<label class="done-label" id="done-wrap">',
         '  <input id="sdd-done" type="checkbox">',
-        '  <span>Faite ✓</span>',
+        '  <span>SDD faite ✓</span>',
         '</label>',
         '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">',
-        '  <button id="md-save" class="md-btn primary">Sauver</button>',
-        '  <button id="md-toggle" class="md-btn">Aperçu</button>',
+        '  <button id="md-save" class="md-btn primary">⌃S Sauver</button>',
+        '  <button id="md-toggle" class="md-btn">👁 Aperçu</button>',
         '  <span id="md-status" style="margin-left:auto;font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)"></span>',
         '</div>',
         '<textarea id="md-area" spellcheck="false" style="' +
@@ -1450,15 +1456,15 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
           'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;' +
           'font-size:var(--fs-notes);line-height:1.6;color:var(--text);outline:none;' +
           'background:#fafcff;transition:border-color var(--transition),box-shadow var(--transition)' +
-        '" placeholder="Notes..."></textarea>',
+        '" placeholder="Notes Markdown..."></textarea>',
         '<div id="md-prev" style="display:none;margin-top:10px;padding:14px;' +
           'border:1px solid var(--border);border-radius:var(--r-sm);background:#fafcff;min-height:60px"></div>',
         '<div class="shortcuts-hint">',
-        '',
-        '',
-        '',
-        '',
-        '',
+        '  <kbd>Ctrl/⌘ S</kbd> Sauver &nbsp;',
+        '  <kbd>Ctrl/⌘ B</kbd> Gras &nbsp;',
+        '  <kbd>Ctrl/⌘ I</kbd> Italique &nbsp;',
+        '  <kbd>Ctrl/⌘ U</kbd> Souligné &nbsp;',
+        '  <kbd>Tab</kbd> / <kbd>⇧ Tab</kbd> Indent',
         '</div>',
       ].join('\n');
       const noteCard = card('Suivi & notes', '#4f46e5', notesHTML, 'notes');
