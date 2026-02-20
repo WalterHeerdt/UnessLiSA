@@ -925,7 +925,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <div class="h-badge">LISA 2025</div>
       <h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1>
       <a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
     document.body.appendChild(hdr);
 
     // Barre de contrôle
