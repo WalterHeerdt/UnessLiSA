@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      7.4
-// @description  Liste SDD + redesign pages + case "faite" + notes Markdown (local) + sticky + raccourcis (Ctrl/Cmd+S,B,I,U) + Tab/Shift+Tab + encarts minimisables (persistant) + tailles de police via constantes + FIX mobile (media query sans var()) + Cloud sync (username+PIN via Firebase) + auto-update GitHub + bouton déconnexion
+// @version      8.0
+// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
 // @match        https://livret.uness.fr/lisa/2025/Cat*gorie:Situation_de_d*part
@@ -19,6 +19,8 @@
 // @connect      identitytoolkit.googleapis.com
 // @connect      securetoken.googleapis.com
 // @connect      *.googleapis.com
+// @connect      api.openai.com
+// @connect      cloudfunctions.net
 // ==/UserScript==
 
 (async function () {
@@ -66,6 +68,12 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       projectId: 'uneisa-26e34',
       pushDebounceMs: 900,
     },
+    community: {
+      adminUid:        'LjUIKPPNONS9ar4WdPhVWYDM1CG3',
+      summaryTTLms:    24 * 60 * 60 * 1000,   // 24h
+      minNotes:        1,                       // nb min de notes pour générer
+      openaiModel:     'gpt-4o-mini',
+    },
   };
 
   const BASE      = 'https://livret.uness.fr';
@@ -88,7 +96,12 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   const setDone  = (n, v) => { GM_setValue(doneKey(n), !!v); cloudSchedulePush(); };
 
   const getNotes = (n)      => GM_getValue(notesKey(n), '');
-  const setNotes = (n, md)  => { GM_setValue(notesKey(n), String(md ?? '')); cloudSchedulePush(); };
+  const setNotes = (n, md)  => {
+    GM_setValue(notesKey(n), String(md ?? ''));
+    cloudSchedulePush();
+    // Miroir public asynchrone — fire & forget
+    publicNoteMirrorPush(n, String(md ?? '')).catch(() => {});
+  };
 
   const isCollapsedKey  = (k)    => !!GM_getValue(COLLAPSE_PREFIX + k, false);
   const setCollapsedKey = (k, v) => { GM_setValue(COLLAPSE_PREFIX + k, !!v); cloudSchedulePush(); };
@@ -485,6 +498,162 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     _pushTimer = setTimeout(async () => {
       try { await cloudPush(exportLocalState()); } catch (_) {}
     }, CFG.cloud.pushDebounceMs || 900);
+  }
+
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // COMMUNITY NOTES — Cloud Functions proxy (clé OpenAI côté serveur)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const FUNCTIONS_BASE = `https://europe-west1-${CFG.cloud.projectId}.cloudfunctions.net`;
+  const MIGRATE_KEY    = 'uness_community_migrated_v1';
+
+  // ── Appel générique vers une Cloud Function callable (HTTPS) ──
+  async function callFunction(name, payload) {
+    const tok = await cloudEnsureSession();
+    if (!tok) throw new Error('Non authentifié');
+
+    const url = `${FUNCTIONS_BASE}/${name}`;
+    const r   = await fetch(url, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${tok.idToken}`,
+      },
+      body: JSON.stringify({ data: payload }),
+    });
+
+    const json = await r.json().catch(() => ({}));
+    if (!r.ok || json?.error) {
+      throw new Error(json?.error?.message || `HTTP ${r.status}`);
+    }
+    return json?.result ?? json;
+  }
+
+  // ── Migration one-shot : toutes les notes existantes → miroir public ──
+  async function communityMigrateIfNeeded() {
+    if (!cloudEnabled()) return;
+    if (GM_getValue(MIGRATE_KEY, false)) return;
+
+    try {
+      // Collecter toutes les notes locales
+      const notes = {};
+      GM_listValues().forEach(k => {
+        if (!k.startsWith(NOTES_PREFIX)) return;
+        const val = GM_getValue(k, '').trim();
+        if (!val) return;
+        const num = k.replace(NOTES_PREFIX, ''); // ex: "001"
+        notes[num] = val;
+      });
+
+      if (Object.keys(notes).length === 0) {
+        GM_setValue(MIGRATE_KEY, true);
+        return;
+      }
+
+      console.log(`[UNESS-COMMUNITY] Migration de ${Object.keys(notes).length} notes...`);
+      await callFunction('migrateAllNotes', { notes });
+      GM_setValue(MIGRATE_KEY, true);
+      console.log('[UNESS-COMMUNITY] Migration OK');
+    } catch (e) {
+      console.warn('[UNESS-COMMUNITY] Migration échouée (retry au prochain chargement):', e.message);
+    }
+  }
+
+  // ── Miroir public à chaque sauvegarde de note ──
+  async function publicNoteMirrorPush(sddN, md) {
+    if (!cloudEnabled() || !sddN) return;
+    try {
+      await callFunction('mirrorPublicNote', { sddN, note: md || '' });
+    } catch (e) {
+      console.warn('[UNESS-COMMUNITY] mirrorPublicNote échoué:', e.message);
+    }
+  }
+
+  // ── Orchestrateur : chargement/génération du résumé communautaire ──
+  async function communityNotesLoad(sddN, sddName, containerEl) {
+    if (!cloudEnabled() || !sddN) return;
+
+    containerEl.innerHTML = communityLoadingHTML();
+
+    try {
+      const result = await callFunction('generateCommunitySummary', { sddN, sddName });
+      const { summary, noteCount, updatedAt } = result;
+
+      if (!summary) {
+        containerEl.innerHTML = communityEmptyHTML();
+        return;
+      }
+      containerEl.innerHTML = communitySummaryHTML(summary, noteCount, updatedAt);
+    } catch (e) {
+      console.error('[UNESS-COMMUNITY] Erreur:', e);
+      containerEl.innerHTML = communityErrorHTML(e.message);
+    }
+  }
+
+  // ── Rendu HTML du résumé ──
+  function communitySummaryHTML(summaryJson, noteCount, updatedAt) {
+    let parsed;
+    try { parsed = typeof summaryJson === 'string' ? JSON.parse(summaryJson) : summaryJson; }
+    catch { return communityErrorHTML('Résumé invalide en base.'); }
+
+    const SECTIONS = [
+      { key: 'points_cles',                       label: '⭐ Points clés',                    color: '#4f46e5' },
+      { key: 'signes_cliniques',                   label: '🩺 Signes cliniques',               color: '#0891b2' },
+      { key: 'diagnostics_a_evoquer',              label: '🔎 Diagnostics à évoquer',          color: '#dc2626' },
+      { key: 'examens_complementaires',            label: '🧪 Examens complémentaires',        color: '#059669' },
+      { key: 'medicaments_et_effets_secondaires',  label: '💊 Médicaments & effets secondaires', color: '#d97706' },
+      { key: 'rappels_importants',                 label: '⚠️ Rappels importants',             color: '#7c3aed' },
+    ];
+
+    const date = new Date(updatedAt).toLocaleDateString('fr-FR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+
+    let html = `<div style="font-size:var(--fs-tiny);color:var(--muted);margin-bottom:12px">
+      Synthèse de <strong style="color:var(--text)">${noteCount}</strong> note(s) · Générée le ${date}
+    </div>`;
+
+    let hasContent = false;
+    SECTIONS.forEach(({ key, label, color }) => {
+      const items = parsed[key];
+      if (!Array.isArray(items) || items.length === 0) return;
+      hasContent = true;
+      html += `<div style="margin-bottom:14px">
+        <div style="font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.5px;
+          text-transform:uppercase;color:${color};margin-bottom:6px">${label}</div>
+        <ul style="margin:0 0 0 16px;padding:0;list-style:disc">
+          ${items.map(item =>
+            `<li style="font-size:var(--fs-small);color:var(--text2);line-height:1.6;margin-bottom:3px">
+              ${escapeHtml(item)}
+            </li>`
+          ).join('')}
+        </ul>
+      </div>`;
+    });
+
+    if (!hasContent) return communityEmptyHTML();
+    return html;
+  }
+
+  function communityLoadingHTML() {
+    return `<div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:var(--fs-small)">
+      <div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--ac);
+        border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0"></div>
+      Chargement de la synthèse communautaire…
+    </div>`;
+  }
+
+  function communityEmptyHTML() {
+    return `<p style="color:var(--muted);font-size:var(--fs-small);font-style:italic;margin:0">
+      Pas encore assez de notes pour générer une synthèse.
+    </p>`;
+  }
+
+  function communityErrorHTML(msg) {
+    return `<p style="color:var(--danger);font-size:var(--fs-small);margin:0">
+      ⚠ Erreur : ${escapeHtml(msg)}
+    </p>`;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1273,6 +1442,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     async function bootSDD() {
       if (cloudEnabled()) {
         try { const r = await cloudPull(); if (r) importLocalState(r); } catch (_) {}
+        // Migration one-shot des notes existantes vers le miroir public
+        communityMigrateIfNeeded().catch(() => {});
       }
       let attempts = 0;
       const tryBuild = () => {
@@ -1446,8 +1617,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         '  <span>SDD faite ✓</span>',
         '</label>',
         '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">',
-        '  <button id="md-save" class="md-btn primary">Sauver</button>',
-        '  <button id="md-toggle" class="md-btn">Aperçu</button>',
+        '  <button id="md-save" class="md-btn primary">⌃S Sauver</button>',
+        '  <button id="md-toggle" class="md-btn">👁 Aperçu</button>',
         '  <span id="md-status" style="margin-left:auto;font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)"></span>',
         '</div>',
         '<textarea id="md-area" spellcheck="false" style="' +
@@ -1456,15 +1627,15 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
           'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;' +
           'font-size:var(--fs-notes);line-height:1.6;color:var(--text);outline:none;' +
           'background:#fafcff;transition:border-color var(--transition),box-shadow var(--transition)' +
-        '" placeholder="Notes"></textarea>',
+        '" placeholder="Notes Markdown..."></textarea>',
         '<div id="md-prev" style="display:none;margin-top:10px;padding:14px;' +
           'border:1px solid var(--border);border-radius:var(--r-sm);background:#fafcff;min-height:60px"></div>',
         '<div class="shortcuts-hint">',
-        '',
-        '',
-        '',
-        '',
-        '',
+        '  <kbd>Ctrl/⌘ S</kbd> Sauver &nbsp;',
+        '  <kbd>Ctrl/⌘ B</kbd> Gras &nbsp;',
+        '  <kbd>Ctrl/⌘ I</kbd> Italique &nbsp;',
+        '  <kbd>Ctrl/⌘ U</kbd> Souligné &nbsp;',
+        '  <kbd>Tab</kbd> / <kbd>⇧ Tab</kbd> Indent',
         '</div>',
       ].join('\n');
       const noteCard = card('Suivi & notes', '#4f46e5', notesHTML, 'notes');
@@ -1555,6 +1726,41 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       follow.appendChild(err);
     }
 
+    // ── Encart Notes de la communauté (sous la card suivi&notes) ──
+    if (sddN != null) {
+      const commCard = document.createElement('div');
+      commCard.className = 'sc';
+      commCard.dataset.key = 'community';
+      const commCollapsed = isCollapsedKey(`sdd_${sddN}_community`);
+      if (commCollapsed) commCard.classList.add('collapsed');
+      commCard.innerHTML = `
+        <div class="sc-head">
+          <div class="sc-dot" style="background:linear-gradient(135deg,#6366f1,#d97706)"></div>
+          Notes de la communauté
+          <span style="margin-left:6px;font-size:10px;background:#eef2ff;color:#4f46e5;
+            padding:2px 6px;border-radius:999px;font-weight:var(--fw-bold);letter-spacing:.5px">IA</span>
+          <span class="sc-toggle">▾</span>
+        </div>
+        <div class="sc-body" id="community-body"></div>`;
+      follow.appendChild(commCard);
+
+      // Lancer le chargement si pas collapsed
+      const commBody = commCard.querySelector('#community-body');
+      if (!commCollapsed) {
+        communityNotesLoad(sddN, sddName, commBody);
+      }
+
+      // Si on expand manuellement et que c'est vide → déclencher
+      commCard.querySelector('.sc-head').addEventListener('click', (e) => {
+        if (e.target.closest('button,input,textarea,select,a,label')) return;
+        const nowCollapsed = commCard.classList.toggle('collapsed');
+        setCollapsedKey(`sdd_${sddN}_community`, nowCollapsed);
+        if (!nowCollapsed && !commBody.innerHTML.trim()) {
+          communityNotesLoad(sddN, sddName, commBody);
+        }
+      });
+    }
+
     body.appendChild(follow);
     body.appendChild(content);
     document.body.appendChild(body);
@@ -1567,6 +1773,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       head.addEventListener('click', (e) => {
         if (e.target.closest('button,input,textarea,select,a,label')) return;
+        if (key === 'community') return; // géré séparément ci-dessus
         const collapsed = sc.classList.toggle('collapsed');
         setCollapsedKey(`sdd_${sddN}_${key}`, collapsed);
       });
