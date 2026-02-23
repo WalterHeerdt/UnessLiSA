@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
+// @name         UNESS – SDD Enhanced
 // @namespace    http://tampermonkey.net/
-// @version      8.2
+// @version      8.3
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -514,8 +514,11 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     const tok = await cloudEnsureSession();
     if (!tok) throw new Error('Non authentifié');
 
+    // Cloud Functions v2 : URL avec nom complet
     const url = `${FUNCTIONS_BASE}/${name}`;
-    const r   = await fetch(url, {
+    console.log('[UNESS-CF] Appel:', name, url);
+
+    const r = await fetch(url, {
       method:  'POST',
       headers: {
         'Content-Type':  'application/json',
@@ -524,10 +527,16 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       body: JSON.stringify({ data: payload }),
     });
 
-    const json = await r.json().catch(() => ({}));
+    const text = await r.text().catch(() => '{}');
+    let json;
+    try { json = JSON.parse(text); } catch { json = {}; }
+
+    console.log('[UNESS-CF] Réponse', name, r.status, json);
+
     if (!r.ok || json?.error) {
-      throw new Error(json?.error?.message || `HTTP ${r.status}`);
+      throw new Error(json?.error?.message || json?.error?.status || 'HTTP ' + r.status);
     }
+    // Cloud Functions v2 wraps result in { result: ... }
     return json?.result ?? json;
   }
 
@@ -1449,6 +1458,40 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       .tag-d{background:#eff6ff;color:#1d4ed8}
       .tag-c{background:#f0fdf4;color:#15803d}
 
+      /* ── Bouton IA par attendu ── */
+      .att-ai-btn{
+        display:inline;margin-left:6px;padding:0 4px;
+        border:none;border-radius:4px;
+        background:none;color:var(--border2);
+        font-size:11px;line-height:1;
+        cursor:pointer;font-family:inherit;
+        transition:color var(--transition),opacity var(--transition);
+        vertical-align:middle;opacity:0;
+      }
+      .at tbody tr:hover .att-ai-btn{opacity:1}
+      .att-panel-row:hover{background:transparent!important}
+      .att-ai-btn:hover{color:#4f46e5}
+      .att-ai-btn.active{opacity:1;color:#4f46e5}
+      .att-ai-btn.loading{opacity:.4;pointer-events:none}
+      .att-ai-panel{
+        display:block;margin-top:0;padding:12px 14px;
+        border-radius:var(--r-sm);border:1px solid #e0e7ff;
+        background:#f8f9ff;font-size:var(--fs-small);line-height:1.7;
+        color:var(--text2);
+      }
+      .att-ai-panel.visible{display:block}
+      .att-ai-panel h2,.att-ai-panel h3{
+        font-size:var(--fs-small);font-weight:var(--fw-bold);
+        color:var(--ac);margin:12px 0 4px;
+      }
+      .att-ai-panel ul{margin:4px 0 8px 16px;padding:0;list-style:disc}
+      .att-ai-panel li{margin-bottom:3px}
+      .att-ai-panel p{margin:4px 0}
+      .att-ai-panel strong{font-weight:var(--fw-semi);color:var(--text)}
+      .att-ai-panel table{width:100%;border-collapse:collapse;margin:8px 0;font-size:var(--fs-tiny)}
+      .att-ai-panel th,.att-ai-panel td{padding:5px 8px;border:1px solid var(--border);text-align:left}
+      .att-ai-panel th{background:var(--surface2);font-weight:var(--fw-semi)}
+
       /* ── Boutons dans la card notes ── */
       .md-btn{
         padding:7px 12px;border:1px solid var(--border);border-radius:var(--r-sm);
@@ -1634,17 +1677,35 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       ).join('')}</div>`;
     }
 
-    function attTable(rows) {
+      function attTable(rows, tableKey) {
       if (!rows.length) return '<p style="color:var(--muted);font-size:var(--fs-base);font-style:italic">Aucun attendu.</p>';
-      return `<table class="at"><thead><tr>
-        <th style="width:55%">Attendu</th>
-        <th style="width:25%">Domaines</th>
-        <th>Compétences</th>
-      </tr></thead><tbody>${rows.map(r => `<tr>
-        <td>${r.href ? `<a href="${escapeHtml(r.href)}">${escapeHtml(r.text)}</a>` : escapeHtml(r.text)}</td>
-        <td>${r.domains.map(d => `<span class="tag tag-d">${escapeHtml(d)}</span>`).join('')}</td>
-        <td>${r.comps.map(c => `<span class="tag tag-c">${escapeHtml(c)}</span>`).join('')}</td>
-      </tr>`).join('')}</tbody></table>`;
+      const uid = (loadToken() || {}).uid || 'anon';
+      return '<table class="at"><thead><tr>' +
+        '<th style="width:55%">Attendu</th>' +
+        '<th style="width:25%">Domaines</th>' +
+        '<th>Compétences</th>' +
+        '</tr></thead><tbody>' +
+        rows.map((r, i) => {
+          const attId   = `att-${tableKey}-${sddN}-${i}`;
+          const attText = r.text;
+          const domainsHtml = r.domains.map(d => '<span class="tag tag-d">' + escapeHtml(d) + '</span>').join('');
+          const compsHtml   = r.comps.map(c => '<span class="tag tag-c">' + escapeHtml(c) + '</span>').join('');
+          const linkHtml    = r.href ? '<a href="' + escapeHtml(r.href) + '">' + escapeHtml(attText) + '</a>' : escapeHtml(attText);
+          return '<tr class="att-row">' +
+            '<td>' +
+              linkHtml +
+              '<button class="att-ai-btn" data-att-id="' + attId + '" data-att-text="' + attText.replace(/"/g, '&quot;') + '" title="Expliquer cet attendu">✦</button>' +
+            '</td>' +
+            '<td>' + domainsHtml + '</td>' +
+            '<td>' + compsHtml + '</td>' +
+            '</tr>' +
+            '<tr class="att-panel-row" id="panelrow-' + attId + '" style="display:none">' +
+              '<td colspan="3" style="padding:0!important;border-top:none">' +
+                '<div class="att-ai-panel" id="panel-' + attId + '" style="margin:0;border-radius:0;border-left:none;border-right:none;border-bottom:none"></div>' +
+              '</td>' +
+            '</tr>';
+        }).join('') +
+        '</tbody></table>';
     }
 
     // Colonne droite : contenu
@@ -1659,10 +1720,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       content.appendChild(card('Items de connaissance', '#6366f1', html, 'items'));
     }
 
-    if (att_famille.length)    content.appendChild(card(`Attendus — ${famille || 'Famille'}`, '#10b981', attTable(att_famille),    'att_famille'));
-    if (att_specifique.length) content.appendChild(card('Attendus spécifiques',               '#3b82f6', attTable(att_specifique), 'att_specifique'));
-    if (att_stage.length)      content.appendChild(card('Valorisation du stage',              '#f59e0b', attTable(att_stage),      'att_stage'));
-
+      if (att_famille.length)    content.appendChild(card(`Attendus — ${famille || 'Famille'}`, '#10b981', attTable(att_famille,    'famille'),    'att_famille'));
+      if (att_specifique.length) content.appendChild(card('Attendus spécifiques',               '#3b82f6', attTable(att_specifique, 'specifique'), 'att_specifique'));
+      if (att_stage.length)      content.appendChild(card('Valorisation du stage',              '#f59e0b', attTable(att_stage,      'stage'),      'att_stage'));
     // Colonne gauche : notes
     const follow = document.createElement('div');
     follow.id = 'sdd-follow';
@@ -1851,6 +1911,53 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     body.appendChild(follow);
     body.appendChild(content);
     document.body.appendChild(body);
+
+    // ── Délégation : boutons IA par attendu ──
+    content.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.att-ai-btn');
+      if (!btn) return;
+
+      const attId    = btn.dataset.attId;
+      const attText  = btn.dataset.attText;
+      const panel    = document.getElementById('panel-' + attId);
+      const panelRow = document.getElementById('panelrow-' + attId);
+      if (!panel) return;
+
+      const showPanel = () => {
+        if (panelRow) panelRow.style.display = '';
+        panel.classList.add('visible');
+        btn.classList.add('active');
+        btn.textContent = '✦';
+      };
+      const hidePanel = () => {
+        if (panelRow) panelRow.style.display = 'none';
+        panel.classList.remove('visible');
+        btn.classList.remove('active');
+        btn.textContent = '✦';
+      };
+
+      // Toggle si déjà visible
+      if (panel.classList.contains('visible')) { hidePanel(); return; }
+
+      // Déjà du contenu en cache DOM → juste afficher
+      if (panel.innerHTML.trim()) { showPanel(); return; }
+
+      // Appel Cloud Function
+      btn.classList.add('loading');
+      btn.textContent = '…';
+      if (panelRow) panelRow.style.display = '';
+
+      try {
+        const result = await callFunction('explainAttendant', { sddN, sddName, attId, attText });
+        panel.innerHTML = communityMarkdownToHtml(result.explanation || '');
+        showPanel();
+      } catch (err) {
+        panel.innerHTML = '<p style="color:var(--danger);font-size:var(--fs-small)">⚠ ' + escapeHtml(err.message) + '</p>';
+        showPanel();
+      } finally {
+        btn.classList.remove('loading');
+      }
+    });
 
     // Gestion du collapse pour toutes les cards
     document.querySelectorAll('#sdd-body .sc').forEach(sc => {
