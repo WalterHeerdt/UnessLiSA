@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      9.0
+// @version      9.O
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -99,6 +99,39 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   const statusKey   = (n) => STATUS_PREFIX    + pad3(n);
   const doneDateKey = (n) => DONE_DATE_PREFIX + pad3(n);
 
+  // ── Révision espacée ──────────────────────────────────────────────────────
+  const REVIEW_PREFIX = 'uness_sdd_review_v1_';
+  const reviewKey = (n) => REVIEW_PREFIX + pad3(n);
+  // Stocke { lastReview: ISO, step: 0|1|2|3 } — paliers J+1/J+3/J+7/J+30
+  const REVIEW_STEPS = [1, 3, 7, 30];
+
+  function getReview(n) {
+    try { return JSON.parse(GM_getValue(reviewKey(n), 'null')) || null; } catch { return null; }
+  }
+  function setReview(n, obj) {
+    GM_setValue(reviewKey(n), JSON.stringify(obj));
+    cloudSchedulePush();
+  }
+  // Retourne true si cette SDD est due à réviser aujourd'hui
+  function isDueForReview(n) {
+    const r = getReview(n);
+    if (!r || !r.lastReview) return false;
+    const daysSince = (Date.now() - new Date(r.lastReview).getTime()) / 86400000;
+    const needed = REVIEW_STEPS[Math.min(r.step, REVIEW_STEPS.length - 1)];
+    return daysSince >= needed;
+  }
+  // Appelé quand on marque une SDD comme révisée → avance le palier
+  function markReviewed(n) {
+    const r = getReview(n) || { step: 0 };
+    const nextStep = Math.min((r.step || 0) + 1, REVIEW_STEPS.length - 1);
+    setReview(n, { lastReview: new Date().toISOString(), step: nextStep });
+  }
+  // Initialise la révision quand une SDD passe à "done"
+  function initReview(n) {
+    const existing = getReview(n);
+    if (!existing) setReview(n, { lastReview: new Date().toISOString(), step: 0 });
+  }
+
   // ── Status helpers ──────────────────────────────────────────────────────
   // Returns 'todo' | 'inprogress' | 'done'
   function getStatus(n) {
@@ -118,6 +151,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       if (!GM_getValue(doneDateKey(n), '')) {
         GM_setValue(doneDateKey(n), new Date().toISOString());
       }
+      initReview(n);
     } else {
       // Clear done date when un-marking
       GM_setValue(doneDateKey(n), '');
@@ -462,7 +496,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   }
 
   function exportLocalState() {
-    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX, STATUS_PREFIX, DONE_DATE_PREFIX];
+    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX, STATUS_PREFIX, DONE_DATE_PREFIX, REVIEW_PREFIX];
     const out = {};
     GM_listValues().forEach(k => {
       if (prefixes.some(p => k.startsWith(p))) out[k] = GM_getValue(k, null);
@@ -472,7 +506,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
   function importLocalState(obj) {
     if (!obj || typeof obj !== 'object') return;
-    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX, STATUS_PREFIX, DONE_DATE_PREFIX];
+    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX, STATUS_PREFIX, DONE_DATE_PREFIX, REVIEW_PREFIX];
     Object.entries(obj).forEach(([k, v]) => {
       if (prefixes.some(p => k.startsWith(p))) GM_setValue(k, v);
     });
@@ -1053,7 +1087,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       .row{
         display:grid;
-        grid-template-columns:104px 1fr auto 26px 18px;
+        grid-template-columns:104px 1fr auto auto 26px 18px;
         align-items:center;gap:12px;
         padding:10px 16px;
         background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
@@ -1112,6 +1146,123 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       .no-results span{font-size:32px;display:block;margin-bottom:12px}
 
+      /* ── Badge révision ── */
+      .row-review{
+        font-size:10px;font-weight:var(--fw-bold);
+        padding:2px 6px;border-radius:999px;
+        background:#fef3c7;color:#d97706;
+        cursor:pointer;flex-shrink:0;
+        border:none;font-family:inherit;
+        line-height:1.4;
+      }
+      .row-review:hover{background:#fde68a}
+
+      /* ── Bouton Stats ── */
+      #btn-stats{
+        padding:8px 12px;background:transparent;border:1px solid var(--border);
+        border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);
+        font-family:inherit;font-weight:var(--fw-med);cursor:pointer;
+        transition:color var(--transition),border-color var(--transition);
+      }
+      #btn-stats:hover{color:var(--ac);border-color:var(--ac)}
+
+      /* ── Modal Stats ── */
+      #stats-backdrop{
+        position:fixed;inset:0;background:rgba(15,23,42,.45);
+        z-index:900;display:flex;align-items:flex-end;justify-content:flex-end;
+      }
+      #stats-panel{
+        width:min(520px,96vw);height:100vh;
+        background:var(--surface);border-left:1px solid var(--border);
+        display:flex;flex-direction:column;overflow:hidden;
+        box-shadow:-8px 0 32px rgba(0,0,0,.12);
+      }
+      #stats-panel-head{
+        padding:18px 20px;border-bottom:1px solid var(--border);
+        display:flex;align-items:center;gap:10px;
+        font-size:var(--fs-small);font-weight:var(--fw-bold);color:var(--text);
+        flex-shrink:0;
+      }
+      #stats-panel-head button{
+        margin-left:auto;background:none;border:none;cursor:pointer;
+        font-size:18px;color:var(--muted);line-height:1;padding:4px;
+      }
+      #stats-panel-head button:hover{color:var(--text)}
+      #stats-panel-body{
+        flex:1;overflow-y:auto;padding:20px;
+        display:flex;flex-direction:column;gap:20px;
+      }
+
+      /* Compteurs */
+      .stats-counters{
+        display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
+      }
+      .stat-box{
+        background:var(--surface2);border:1px solid var(--border);
+        border-radius:var(--r-sm);padding:12px 14px;text-align:center;
+      }
+      .stat-box-val{
+        font-size:26px;font-weight:var(--fw-heavy);color:var(--text);
+        line-height:1.1;
+      }
+      .stat-box-lbl{
+        font-size:var(--fs-tiny);color:var(--muted);margin-top:3px;font-weight:var(--fw-med);
+      }
+
+      /* Streak */
+      .stats-streak{
+        background:linear-gradient(135deg,#eef2ff,#f5f3ff);
+        border:1px solid #c7d2fe;border-radius:var(--r-sm);
+        padding:14px 16px;display:flex;align-items:center;gap:14px;
+      }
+      .streak-fire{font-size:28px;line-height:1}
+      .streak-val{font-size:22px;font-weight:var(--fw-heavy);color:var(--ac)}
+      .streak-lbl{font-size:var(--fs-tiny);color:var(--muted);font-weight:var(--fw-med)}
+
+      /* Barres spécialités */
+      .stats-section-title{
+        font-size:var(--fs-tiny);font-weight:var(--fw-bold);
+        text-transform:uppercase;letter-spacing:.7px;color:var(--muted);
+        margin-bottom:8px;
+      }
+      .spec-bar-row{
+        display:flex;align-items:center;gap:8px;margin-bottom:7px;
+      }
+      .spec-bar-name{
+        font-size:11px;color:var(--text2);width:140px;flex-shrink:0;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      }
+      .spec-bar-track{
+        flex:1;height:8px;background:var(--border);border-radius:999px;overflow:hidden;
+      }
+      .spec-bar-fill{
+        height:100%;border-radius:999px;
+        background:linear-gradient(to right,var(--ac),#818cf8);
+        transition:width .4s ease;
+      }
+      .spec-bar-count{
+        font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0;
+      }
+
+      /* Heatmap */
+      .heatmap-grid{
+        display:flex;gap:2px;align-items:flex-end;
+        overflow-x:auto;padding-bottom:4px;
+      }
+      .heatmap-col{display:flex;flex-direction:column;gap:2px}
+      .heatmap-cell{
+        width:11px;height:11px;border-radius:2px;
+        background:var(--border);flex-shrink:0;
+      }
+      .heatmap-cell.l1{background:#c7d2fe}
+      .heatmap-cell.l2{background:#818cf8}
+      .heatmap-cell.l3{background:#6366f1}
+      .heatmap-cell.l4{background:#4338ca}
+      .heatmap-months{
+        display:flex;gap:2px;font-size:10px;color:var(--muted);
+        margin-bottom:3px;overflow-x:auto;
+      }
+
       /* ── Bouton logout ── */
       ${LOGOUT_BTN_CSS}
 
@@ -1131,6 +1282,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     hdr.innerHTML = `
       <div class="h-badge">LISA 2025</div>
       <h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1>
+      <button id="btn-stats" title="Statistiques &amp; progression">📊 Stats</button>
       <a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>
       ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(hdr);
@@ -1156,6 +1308,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         <option value="todo">À faire</option>
         <option value="inprogress">En cours</option>
         <option value="done">Faites ✓</option>
+        <option value="review">réviser</option>
       </select>
 
       <div class="sort-btns">
@@ -1182,17 +1335,25 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     // Chargé une fois, mis à jour au clic uniquement
     const _st  = new Map(); // num → 'todo'|'inprogress'|'done'
     const _dd  = new Map(); // num → ISO string | ''
+    const _rv  = new Map(); // num → bool (isDue for review)
     for (const item of items) {
       const s = getStatus(item.num);
       _st.set(item.num, s);
       _dd.set(item.num, s !== 'todo' ? (getDoneDate(item.num) || '') : '');
+      _rv.set(item.num, s === 'done' ? isDueForReview(item.num) : false);
     }
-    const snapStatus   = (n) => _st.get(n) || 'todo';
-    const snapDoneDate = (n) => _dd.get(n) || '';
+    const snapStatus    = (n) => _st.get(n) || 'todo';
+    const snapDoneDate  = (n) => _dd.get(n) || '';
+    const snapDueReview = (n) => !!_rv.get(n);
     function commitStatus(n, next) {
-      setStatus(n, next);                            // écrit en GM + cloud
+      setStatus(n, next);
       _st.set(n, next);
       _dd.set(n, next === 'done' ? (getDoneDate(n) || '') : '');
+      _rv.set(n, next === 'done' ? isDueForReview(n) : false);
+    }
+    function commitReview(n) {
+      markReviewed(n);
+      _rv.set(n, false); // just reviewed → no longer due
     }
 
     // ── Pré-calcul pills HTML (stable entre renders, basé sur tags seulement) ──
@@ -1248,7 +1409,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         const st = snapStatus(item.num);
         item.status = st;
 
-        if (status !== 'all' && st !== status) continue;
+        if (status === 'review') {
+          if (!snapDueReview(item.num)) continue;
+        } else if (status !== 'all' && st !== status) continue;
         if (family && !(item.tags || []).includes(family))   continue;
         if (q) {
           if (!_nameLower.get(item.num).includes(q)
@@ -1282,6 +1445,14 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       statsEl.textContent = `${filtered.length} / ${items.length}`;
 
+      // Sauvegarder l'ordre courant pour prev/next sur page SDD
+      try {
+        localStorage.setItem('uness_sdd_nav_order', JSON.stringify(filtered.map(i => i.num)));
+        localStorage.setItem('uness_sdd_nav_items', JSON.stringify(
+          items.map(i => ({ num: i.num, name: i.name, href: i.href }))
+        ));
+      } catch (_) {}
+
       if (!filtered.length) {
         list.innerHTML = '<div class="no-results"><span>🔍</span>Aucune situation trouvée.</div>';
         return;
@@ -1301,6 +1472,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         html +=
           `<a class="${cls}" href="${escapeHtml(item.href)}" data-i="${i}">` +
           _rowStableHTML.get(item.num) +
+          (snapDueReview(item.num) ? `<button class="row-review" data-rv="${item.num}" title="Marquer comme révisée · ${REVIEW_STEPS[Math.min((getReview(item.num)?.step||0), REVIEW_STEPS.length-1)]}j">🔔</button>` : '') +
           `<span class="row-ck${st === 'done' ? ' on' : ''}" title="${escapeHtml(tip)}">${st === 'done' ? '✓' : ''}</span>` +
           `<span class="row-arr">›</span></a>`;
       }
@@ -1308,6 +1480,18 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       // Un seul listener délégué sur #list pour toutes les coches
       list.onclick = function(ev) {
+        // ── Clic badge révision ──
+        if (ev.target.classList.contains('row-review') || ev.target.dataset.rv) {
+          ev.preventDefault(); ev.stopPropagation();
+          const btn = ev.target.closest('[data-rv]') || ev.target;
+          const n = parseInt(btn.dataset.rv, 10);
+          if (!n) return;
+          commitReview(n);
+          if (status === 'review') { render(); return; }
+          btn.remove(); // retire le badge in-place
+          return;
+        }
+        // ── Clic checkbox ──
         if (!ev.target.classList.contains('row-ck')) return;
         ev.preventDefault();
         ev.stopPropagation();
@@ -1365,6 +1549,172 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
     });
 
+    // ── Stats Modal ──────────────────────────────────────────────────────────
+    function buildStatsModal() {
+      // Calculs
+      const total = items.length;
+      const doneItems = items.filter(i => snapStatus(i.num) === 'done');
+      const inpItems  = items.filter(i => snapStatus(i.num) === 'inprogress');
+      const doneCount = doneItems.length;
+      const inpCount  = inpItems.length;
+      const reviewDue = items.filter(i => snapDueReview(i.num)).length;
+
+      // Streak : jours consécutifs avec au moins une SDD faite
+      const dayMap = new Set();
+      for (const item of doneItems) {
+        const d = snapDoneDate(item.num);
+        if (d) dayMap.add(new Date(d).toDateString());
+      }
+      let streak = 0;
+      const today = new Date();
+      for (let d = 0; d < 365; d++) {
+        const day = new Date(today); day.setDate(today.getDate() - d);
+        if (dayMap.has(day.toDateString())) streak++;
+        else if (d > 0) break;
+      }
+
+      // Barres par spécialité
+      const specMap = {};
+      for (const item of items) {
+        for (const tag of (item.tags || [])) {
+          if (!specMap[tag]) specMap[tag] = { total: 0, done: 0 };
+          specMap[tag].total++;
+          if (snapStatus(item.num) === 'done') specMap[tag].done++;
+        }
+      }
+      const specs = Object.entries(specMap)
+        .sort((a, b) => b[1].done / b[1].total - a[1].done / a[1].total || b[1].total - a[1].total);
+
+      // Heatmap : 52 semaines × 7 jours
+      const heatDayMap = {};
+      for (const item of doneItems) {
+        const d = snapDoneDate(item.num);
+        if (!d) continue;
+        const key = new Date(d).toDateString();
+        heatDayMap[key] = (heatDayMap[key] || 0) + 1;
+      }
+      const maxPerDay = Math.max(...Object.values(heatDayMap), 1);
+
+      function heatLevel(n) {
+        if (!n) return '';
+        const r = n / maxPerDay;
+        return r < .25 ? 'l1' : r < .5 ? 'l2' : r < .75 ? 'l3' : 'l4';
+      }
+
+      // Build heatmap HTML (52 cols, 7 rows = 1 an)
+      let heatHTML = '<div class="heatmap-months">';
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - 7 * 51 - today.getDay());
+      const months = [];
+      let prevMonth = -1;
+      for (let w = 0; w < 52; w++) {
+        const d = new Date(weekStart); d.setDate(weekStart.getDate() + w * 7);
+        const m = d.getMonth();
+        if (m !== prevMonth) {
+          months.push({ w, label: d.toLocaleDateString('fr-FR', { month: 'short' }) });
+          prevMonth = m;
+        }
+      }
+      // Month labels as flex items with approximate widths
+      for (let w = 0; w < 52; w++) {
+        const mo = months.find(m => m.w === w);
+        heatHTML += `<span style="width:13px;flex-shrink:0">${mo ? mo.label.slice(0,3) : ''}</span>`;
+      }
+      heatHTML += '</div><div class="heatmap-grid">';
+      for (let w = 0; w < 52; w++) {
+        heatHTML += '<div class="heatmap-col">';
+        for (let d2 = 0; d2 < 7; d2++) {
+          const day = new Date(weekStart); day.setDate(weekStart.getDate() + w * 7 + d2);
+          if (day > today) { heatHTML += '<div class="heatmap-cell"></div>'; continue; }
+          const key = day.toDateString();
+          const n2 = heatDayMap[key] || 0;
+          const lvl = heatLevel(n2);
+          const label = day.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (n2 ? ` · ${n2} SDD` : '');
+          heatHTML += `<div class="heatmap-cell${lvl ? ' ' + lvl : ''}" title="${label}"></div>`;
+        }
+        heatHTML += '</div>';
+      }
+      heatHTML += '</div>';
+
+      // Barres spécialités HTML
+      let barsHTML = '';
+      for (const [name, { total: tot, done: dn }] of specs) {
+        const pct = Math.round(dn / tot * 100);
+        barsHTML += `
+          <div class="spec-bar-row">
+            <div class="spec-bar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+            <div class="spec-bar-track"><div class="spec-bar-fill" style="width:${pct}%"></div></div>
+            <div class="spec-bar-count">${dn}/${tot}</div>
+          </div>`;
+      }
+
+      // DOM
+      const backdrop = document.createElement('div');
+      backdrop.id = 'stats-backdrop';
+      backdrop.innerHTML = `
+        <div id="stats-panel">
+          <div id="stats-panel-head">
+            📊 Statistiques &amp; Progression
+            <button id="stats-close" title="Fermer">✕</button>
+          </div>
+          <div id="stats-panel-body">
+            <div class="stats-counters">
+              <div class="stat-box">
+                <div class="stat-box-val" style="color:var(--success)">${doneCount}</div>
+                <div class="stat-box-lbl">Faites</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-val" style="color:#fb923c">${inpCount}</div>
+                <div class="stat-box-lbl">En cours</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-val" style="color:var(--muted)">${total - doneCount - inpCount}</div>
+                <div class="stat-box-lbl">À faire</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-val">${Math.round(doneCount / total * 100)}%</div>
+                <div class="stat-box-lbl">Progression</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-val" style="color:#d97706">${reviewDue}</div>
+                <div class="stat-box-lbl">À réviser</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-box-val" style="color:var(--ac)">${total}</div>
+                <div class="stat-box-lbl">Total SDD</div>
+              </div>
+            </div>
+
+            <div class="stats-streak">
+              <div class="streak-fire">🔥</div>
+              <div>
+                <div class="streak-val">${streak} jour${streak !== 1 ? 's' : ''}</div>
+                <div class="streak-lbl">Streak actuel</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="stats-section-title">Heatmap — 12 derniers mois</div>
+              ${heatHTML}
+            </div>
+
+            <div>
+              <div class="stats-section-title">Progression par spécialité</div>
+              ${barsHTML}
+            </div>
+          </div>
+        </div>`;
+
+      document.body.appendChild(backdrop);
+      backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
+      backdrop.querySelector('#stats-close').addEventListener('click', () => backdrop.remove());
+      document.addEventListener('keydown', function onEsc(e) {
+        if (e.key === 'Escape') { backdrop.remove(); document.removeEventListener('keydown', onEsc); }
+      });
+    }
+
+    document.getElementById('btn-stats').addEventListener('click', buildStatsModal);
+
     render();
   }
 
@@ -1404,6 +1754,22 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       #sdd-bc a:hover{color:var(--ac)}
       #sdd-bc .sep{color:var(--border2);user-select:none}
       #sdd-bc .bc-spacer{margin-left:auto}
+
+      /* ── Prev / Next ── */
+      .sdd-nav-btn{
+        display:inline-flex;align-items:center;gap:5px;
+        padding:5px 11px;border:1px solid var(--border);border-radius:var(--r-sm);
+        background:var(--surface2);color:var(--text2);
+        text-decoration:none;font-size:var(--fs-tiny);font-weight:var(--fw-semi);
+        transition:border-color var(--transition),color var(--transition);
+        white-space:nowrap;
+      }
+      .sdd-nav-btn:hover{border-color:var(--ac);color:var(--ac)}
+      .sdd-nav-btn.disabled{opacity:.35;pointer-events:none}
+      #sdd-nav-pos{
+        font-size:var(--fs-tiny);color:var(--muted);
+        padding:0 6px;font-variant-numeric:tabular-nums;
+      }
 
       /* ── Header SDD ── */
       #sdd-top{
@@ -1695,6 +2061,25 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
     document.body.innerHTML = '';
 
+    // ── Prev / Next depuis localStorage ──────────────────────────────────────
+    let navOrder = [], navItems = {}, navIdx = -1;
+    try {
+      const ord = localStorage.getItem('uness_sdd_nav_order');
+      const its = localStorage.getItem('uness_sdd_nav_items');
+      if (ord) navOrder = JSON.parse(ord);
+      if (its) {
+        const arr = JSON.parse(its);
+        for (const it of arr) navItems[it.num] = it;
+      }
+      if (sddN) navIdx = navOrder.indexOf(sddN);
+    } catch (_) {}
+
+    const prevNum = navIdx > 0              ? navOrder[navIdx - 1] : null;
+    const nextNum = navIdx < navOrder.length - 1 ? navOrder[navIdx + 1] : null;
+    const prevHref = prevNum ? (navItems[prevNum]?.href || '#') : null;
+    const nextHref = nextNum ? (navItems[nextNum]?.href || '#') : null;
+    const navPos   = navOrder.length > 0 && navIdx >= 0 ? `${navIdx + 1} / ${navOrder.length}` : '';
+
     // Breadcrumb
     const bc = document.createElement('div');
     bc.id = 'sdd-bc';
@@ -1705,8 +2090,22 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <span class="sep">›</span>
       <strong style="color:var(--text2);font-weight:var(--fw-semi)">${escapeHtml(sddNum)}</strong>
       <span class="bc-spacer"></span>
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
+      ${navOrder.length > 1 ? `
+        <a class="sdd-nav-btn${prevHref ? '' : ' disabled'}" ${prevHref ? `href="${escapeHtml(prevHref)}"` : ''} title="${prevNum ? `SDD-${pad3(prevNum)}` : ''}">‹ Préc.</a>
+        ${navPos ? `<span id="sdd-nav-pos">${navPos}</span>` : ''}
+        <a class="sdd-nav-btn${nextHref ? '' : ' disabled'}" ${nextHref ? `href="${escapeHtml(nextHref)}"` : ''} title="${nextNum ? `SDD-${pad3(nextNum)}` : ''}">Suiv. ›</a>
+      ` : ''}
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
     document.body.appendChild(bc);
+
+    // Raccourcis clavier prev/next
+    if (navOrder.length > 1) {
+      document.addEventListener('keydown', (e) => {
+        if (document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT') return;
+        if (e.key === 'ArrowLeft'  && prevHref) location.href = prevHref;
+        if (e.key === 'ArrowRight' && nextHref) location.href = nextHref;
+      });
+    }
 
     // Header
     const top = document.createElement('div');
