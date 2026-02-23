@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      8.0
+// @version      8.2
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -52,13 +52,15 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     fwSemibold: 600,
     fwBold:     700,
     fwHeavy:    800,
-    notesColWidth:     340,
+    notesColWidth:     420,   // largeur initiale colonne notes (px)
+    notesColMin:       260,
+    notesColMax:       700,
     railsMin:           14,
     railsMax:           48,
     breakpointOneCol:  980,
     stickyTop:          14,
     cacheTTLms: 48 * 60 * 60 * 1000,
-    autosaveDelay: 250,
+    autosaveDelay: 15000,   // 15s après dernière frappe
     indentSpaces:    2,
     cloud: {
       enabled: true,
@@ -99,8 +101,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   const setNotes = (n, md)  => {
     GM_setValue(notesKey(n), String(md ?? ''));
     cloudSchedulePush();
-    // Miroir public asynchrone — fire & forget
-    publicNoteMirrorPush(n, String(md ?? '')).catch(() => {});
+    // Miroir public : appelé uniquement sur sauvegarde explicite (pas ici)
   };
 
   const isCollapsedKey  = (k)    => !!GM_getValue(COLLAPSE_PREFIX + k, false);
@@ -591,49 +592,100 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     }
   }
 
-  // ── Rendu HTML du résumé ──
-  function communitySummaryHTML(summaryJson, noteCount, updatedAt) {
-    let parsed;
-    try { parsed = typeof summaryJson === 'string' ? JSON.parse(summaryJson) : summaryJson; }
-    catch { return communityErrorHTML('Résumé invalide en base.'); }
+  // ── Rendu HTML du résumé — markdown libre rendu en HTML ──
+  function communitySummaryHTML(summary, noteCount, updatedAt) {
+    if (!summary || !summary.trim()) return communityEmptyHTML();
 
-    const SECTIONS = [
-      { key: 'points_cles',                       label: '⭐ Points clés',                    color: '#4f46e5' },
-      { key: 'signes_cliniques',                   label: '🩺 Signes cliniques',               color: '#0891b2' },
-      { key: 'diagnostics_a_evoquer',              label: '🔎 Diagnostics à évoquer',          color: '#dc2626' },
-      { key: 'examens_complementaires',            label: '🧪 Examens complémentaires',        color: '#059669' },
-      { key: 'medicaments_et_effets_secondaires',  label: '💊 Médicaments & effets secondaires', color: '#d97706' },
-      { key: 'rappels_importants',                 label: '⚠️ Rappels importants',             color: '#7c3aed' },
-    ];
+    const date = new Date(updatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-    const date = new Date(updatedAt).toLocaleDateString('fr-FR', {
-      day: '2-digit', month: '2-digit', year: 'numeric',
+    const meta = '<div style="font-size:var(--fs-tiny);color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">'
+      + 'Synthèse de <strong style="color:var(--text)">' + noteCount + '</strong> note(s) · Générée le ' + date
+      + '</div>';
+
+    return meta + communityMarkdownToHtml(summary);
+  }
+
+  // ── Markdown → HTML simple, sans regex complexes ──
+  function communityMarkdownToHtml(md) {
+    if (!md) return '';
+
+    const lines  = md.split('\n');
+    let   html   = '';
+    let   inList = false;
+
+    lines.forEach(function(line) {
+      // Titre ##
+      if (line.startsWith('### ')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<div style="font-size:var(--fs-small);font-weight:var(--fw-bold);color:var(--ac);margin:16px 0 6px;letter-spacing:.3px">'
+          + inlineMarkdown(line.slice(4)) + '</div>';
+        return;
+      }
+      if (line.startsWith('## ')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<div style="font-size:var(--fs-base);font-weight:var(--fw-bold);color:var(--text);margin:20px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--border)">'
+          + inlineMarkdown(line.slice(3)) + '</div>';
+        return;
+      }
+      if (line.startsWith('# ')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<div style="font-size:var(--fs-h4);font-weight:var(--fw-heavy);color:var(--text);margin:22px 0 10px">'
+          + inlineMarkdown(line.slice(2)) + '</div>';
+        return;
+      }
+
+      // Bullet point (- ou *)
+      var bulletMatch = line.match(/^(\s*)[-*] (.+)$/);
+      if (bulletMatch) {
+        if (!inList) { html += '<ul style="margin:4px 0 10px 18px;padding:0;list-style:disc">'; inList = true; }
+        var indent = bulletMatch[1].length > 0 ? 'margin-left:16px;' : '';
+        html += '<li style="' + indent + 'margin-bottom:4px;color:var(--text2);font-size:var(--fs-small);line-height:1.6">'
+          + inlineMarkdown(bulletMatch[2]) + '</li>';
+        return;
+      }
+
+      // Ligne vide
+      if (!line.trim()) {
+        if (inList) { html += '</ul>'; inList = false; }
+        return;
+      }
+
+      // Ligne séparatrice tableau (---|---)
+      if (/^\|[-:| ]+\|$/.test(line.trim())) return;
+
+      // Ligne tableau |col|col|
+      if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        var cells = line.trim().slice(1, -1).split('|');
+        html += '<tr>' + cells.map(function(c) {
+          return '<td style="padding:6px 10px;border:1px solid var(--border);font-size:var(--fs-small);color:var(--text2)">'
+            + inlineMarkdown(c.trim()) + '</td>';
+        }).join('') + '</tr>';
+        return;
+      }
+
+      // Paragraphe normal
+      if (inList) { html += '</ul>'; inList = false; }
+      html += '<p style="margin:6px 0;color:var(--text2);font-size:var(--fs-small);line-height:1.65">'
+        + inlineMarkdown(line) + '</p>';
     });
 
-    let html = `<div style="font-size:var(--fs-tiny);color:var(--muted);margin-bottom:12px">
-      Synthèse de <strong style="color:var(--text)">${noteCount}</strong> note(s) · Générée le ${date}
-    </div>`;
+    if (inList) html += '</ul>';
 
-    let hasContent = false;
-    SECTIONS.forEach(({ key, label, color }) => {
-      const items = parsed[key];
-      if (!Array.isArray(items) || items.length === 0) return;
-      hasContent = true;
-      html += `<div style="margin-bottom:14px">
-        <div style="font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.5px;
-          text-transform:uppercase;color:${color};margin-bottom:6px">${label}</div>
-        <ul style="margin:0 0 0 16px;padding:0;list-style:disc">
-          ${items.map(item =>
-            `<li style="font-size:var(--fs-small);color:var(--text2);line-height:1.6;margin-bottom:3px">
-              ${escapeHtml(item)}
-            </li>`
-          ).join('')}
-        </ul>
-      </div>`;
+    // Enrober les lignes <tr> dans un <table>
+    html = html.replace(/(<tr>.*?<\/tr>)+/gs, function(match) {
+      return '<div style="overflow-x:auto;margin:10px 0"><table style="width:100%;border-collapse:collapse">' + match + '</table></div>';
     });
 
-    if (!hasContent) return communityEmptyHTML();
     return html;
+  }
+
+  function inlineMarkdown(s) {
+    if (!s) return '';
+    return s
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g,     '<em>$1</em>')
+      .replace(new RegExp(String.fromCharCode(96)+'(.+?)'+String.fromCharCode(96),'g'), '<code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:.9em">$1</code>');
   }
 
   function communityLoadingHTML() {
@@ -1324,6 +1376,21 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         overflow-y:auto;
       }
 
+      /* ── Resize handle colonne notes ── */
+      #notes-resize-handle{
+        position:absolute;top:0;right:-5px;width:10px;height:100%;
+        cursor:col-resize;z-index:10;
+        display:flex;align-items:center;justify-content:center;
+      }
+      #notes-resize-handle::after{
+        content:'';display:block;width:3px;height:40px;
+        border-radius:3px;background:var(--border2);
+        transition:background var(--transition);
+      }
+      #notes-resize-handle:hover::after,
+      #notes-resize-handle.dragging::after{
+        background:var(--ac);
+      }
       /* ── Cards ── */
       .sc{
         background:var(--surface);border:1px solid var(--border);
@@ -1410,16 +1477,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       .done-label span{font-size:var(--fs-base);font-weight:var(--fw-semi);color:var(--text)}
 
-      /* Raccourcis hint */
-      .shortcuts-hint{
-        font-size:var(--fs-tiny);color:var(--muted);line-height:1.8;
-        border-top:1px solid var(--border);padding-top:10px;margin-top:10px;
-      }
-      .shortcuts-hint kbd{
-        display:inline-block;padding:1px 5px;border:1px solid var(--border2);
-        border-radius:4px;font-family:inherit;font-size:11px;
-        background:#fff;color:var(--text2);
-      }
+
 
       /* ── Bouton logout ── */
       ${LOGOUT_BTN_CSS}
@@ -1609,18 +1667,46 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     const follow = document.createElement('div');
     follow.id = 'sdd-follow';
 
+    // ── Resize handle ──
+    const resizeHandle = document.createElement('div');
+    resizeHandle.id = 'notes-resize-handle';
+    follow.appendChild(resizeHandle);
+
+    // Restore saved width
+    const savedW = parseInt(GM_getValue('uness_notes_col_width', CFG.notesColWidth), 10);
+    document.documentElement.style.setProperty('--notes-col', savedW + 'px');
+
+    // Drag to resize
+    let _dragStartX = 0, _dragStartW = 0;
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      _dragStartX = e.clientX;
+      _dragStartW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--notes-col'), 10) || savedW;
+      resizeHandle.classList.add('dragging');
+
+      const onMove = (e) => {
+        const delta = e.clientX - _dragStartX;
+        const newW  = Math.min(CFG.notesColMax, Math.max(CFG.notesColMin, _dragStartW + delta));
+        document.documentElement.style.setProperty('--notes-col', newW + 'px');
+      };
+      const onUp = (e) => {
+        resizeHandle.classList.remove('dragging');
+        const finalW = Math.min(CFG.notesColMax, Math.max(CFG.notesColMin, _dragStartW + (e.clientX - _dragStartX)));
+        GM_setValue('uness_notes_col_width', finalW);
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
     if (sddN != null) {
       const notesCollapsed = isCollapsedKey(`sdd_${sddN}_notes`);
       const notesHTML = [
         '<label class="done-label" id="done-wrap">',
         '  <input id="sdd-done" type="checkbox">',
-        '  <span>SDD faite ✓</span>',
+        '  <span>SDD faite</span>',
         '</label>',
-        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">',
-        '  <button id="md-save" class="md-btn primary">⌃S Sauver</button>',
-        '  <button id="md-toggle" class="md-btn">👁 Aperçu</button>',
-        '  <span id="md-status" style="margin-left:auto;font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)"></span>',
-        '</div>',
         '<textarea id="md-area" spellcheck="false" style="' +
           'width:100%;min-height:220px;max-height:60vh;resize:vertical;' +
           'padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);' +
@@ -1630,12 +1716,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         '" placeholder="Notes Markdown..."></textarea>',
         '<div id="md-prev" style="display:none;margin-top:10px;padding:14px;' +
           'border:1px solid var(--border);border-radius:var(--r-sm);background:#fafcff;min-height:60px"></div>',
-        '<div class="shortcuts-hint">',
-        '  <kbd>Ctrl/⌘ S</kbd> Sauver &nbsp;',
-        '  <kbd>Ctrl/⌘ B</kbd> Gras &nbsp;',
-        '  <kbd>Ctrl/⌘ I</kbd> Italique &nbsp;',
-        '  <kbd>Ctrl/⌘ U</kbd> Souligné &nbsp;',
-        '  <kbd>Tab</kbd> / <kbd>⇧ Tab</kbd> Indent',
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">',
+        '  <button id="md-toggle" class="md-btn">Aperçu</button>',
+        '  <span id="md-status" style="margin-left:auto;font-size:var(--fs-tiny);color:var(--muted)"></span>',
         '</div>',
       ].join('\n');
       const noteCard = card('Suivi & notes', '#4f46e5', notesHTML, 'notes');
@@ -1656,6 +1739,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       const saveNow = () => {
         setNotes(sddN, areaEl.value);
+        publicNoteMirrorPush(sddN, areaEl.value).catch(() => {});
         setStatus('Sauvé ✓');
         clearTimeout(saveNow._t);
         saveNow._t = setTimeout(() => setStatus(''), 1400);
@@ -1670,7 +1754,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         areaEl.style.boxShadow   = 'none';
       });
 
-      saveBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); saveNow(); });
+      // saveBtn removed — save via Ctrl+S or autosave
       doneEl.addEventListener('change', () => setDone(sddN, doneEl.checked));
       noteCard.querySelector('#done-wrap').addEventListener('click', e => e.stopPropagation());
 
@@ -1678,7 +1762,10 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       areaEl.addEventListener('input', () => {
         setStatus('…');
         clearTimeout(autoTimer);
-        autoTimer = setTimeout(saveNow, CFG.autosaveDelay);
+        autoTimer = setTimeout(() => {
+          saveNow();
+          publicNoteMirrorPush(sddN, areaEl.value).catch(() => {});
+        }, CFG.autosaveDelay);
         if (prevEl.style.display !== 'none') prevEl.innerHTML = mdToHtml(areaEl.value);
       });
 
@@ -1687,7 +1774,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         const show = prevEl.style.display === 'none';
         prevEl.style.display  = show ? 'block' : 'none';
         areaEl.style.display  = show ? 'none'  : 'block';
-        togEl.textContent     = show ? '✏ Éditer' : '👁 Aperçu';
+        togEl.textContent     = show ? 'Éditer' : 'Aperçu';
         if (show) prevEl.innerHTML = mdToHtml(areaEl.value);
       });
 
