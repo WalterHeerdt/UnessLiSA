@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         UNESS – SDD Enhanced
+// @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
 // @namespace    http://tampermonkey.net/
-// @version      8.3
-// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA
+// @version      9.0
+// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
 // @match        https://livret.uness.fr/lisa/2025/Cat*gorie:Situation_de_d*part
@@ -52,7 +52,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     fwSemibold: 600,
     fwBold:     700,
     fwHeavy:    800,
-    notesColWidth:     420,   // largeur initiale colonne notes (px)
+    notesColWidth:     420,
     notesColMin:       260,
     notesColMax:       700,
     railsMin:           14,
@@ -60,7 +60,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     breakpointOneCol:  980,
     stickyTop:          14,
     cacheTTLms: 48 * 60 * 60 * 1000,
-    autosaveDelay: 15000,   // 15s après dernière frappe
+    autosaveDelay: 15000,
     indentSpaces:    2,
     cloud: {
       enabled: true,
@@ -72,8 +72,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     },
     community: {
       adminUid:        'LjUIKPPNONS9ar4WdPhVWYDM1CG3',
-      summaryTTLms:    24 * 60 * 60 * 1000,   // 24h
-      minNotes:        1,                       // nb min de notes pour générer
+      summaryTTLms:    24 * 60 * 60 * 1000,
+      minNotes:        1,
       openaiModel:     'gpt-4o-mini',
     },
   };
@@ -86,22 +86,68 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   // ══════════════════════════════════════════════════════════════════════════
   // STOCKAGE LOCAL (Tampermonkey)
   // ══════════════════════════════════════════════════════════════════════════
-  const DONE_PREFIX     = 'uness_sdd_done_v1_';
-  const NOTES_PREFIX    = 'uness_sdd_notes_v1_';
-  const COLLAPSE_PREFIX = 'uness_sdd_collapse_v1_';
+  const DONE_PREFIX      = 'uness_sdd_done_v1_';
+  const NOTES_PREFIX     = 'uness_sdd_notes_v1_';
+  const COLLAPSE_PREFIX  = 'uness_sdd_collapse_v1_';
+  // NEW: status ('todo' | 'inprogress' | 'done') and done date (ISO string)
+  const STATUS_PREFIX    = 'uness_sdd_status_v1_';
+  const DONE_DATE_PREFIX = 'uness_sdd_donedate_v1_';
 
   const pad3     = (n) => String(parseInt(n, 10)).padStart(3, '0');
   const doneKey  = (n) => DONE_PREFIX  + pad3(n);
   const notesKey = (n) => NOTES_PREFIX + pad3(n);
+  const statusKey   = (n) => STATUS_PREFIX    + pad3(n);
+  const doneDateKey = (n) => DONE_DATE_PREFIX + pad3(n);
 
-  const isDone   = (n)    => !!GM_getValue(doneKey(n), false);
-  const setDone  = (n, v) => { GM_setValue(doneKey(n), !!v); cloudSchedulePush(); };
+  // ── Status helpers ──────────────────────────────────────────────────────
+  // Returns 'todo' | 'inprogress' | 'done'
+  function getStatus(n) {
+    const v = GM_getValue(statusKey(n), '');
+    if (v === 'inprogress' || v === 'done') return v;
+    // Legacy fallback: read old boolean done key
+    if (GM_getValue(doneKey(n), false)) return 'done';
+    return 'todo';
+  }
+
+  function setStatus(n, status) {
+    GM_setValue(statusKey(n), status);
+    // Keep legacy done key in sync for backward compat
+    GM_setValue(doneKey(n), status === 'done');
+    if (status === 'done') {
+      // Save date only if not already set (preserve original completion date)
+      if (!GM_getValue(doneDateKey(n), '')) {
+        GM_setValue(doneDateKey(n), new Date().toISOString());
+      }
+    } else {
+      // Clear done date when un-marking
+      GM_setValue(doneDateKey(n), '');
+    }
+    cloudSchedulePush();
+  }
+
+  function getDoneDate(n) {
+    return GM_getValue(doneDateKey(n), '');
+  }
+
+  // Format date for display: "23 fév." or "23 fév. 2024"
+  function formatDoneDate(iso, includeYear = false) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      const opts = { day: 'numeric', month: 'short' };
+      if (includeYear) opts.year = 'numeric';
+      return d.toLocaleDateString('fr-FR', opts).replace('.', '');
+    } catch { return ''; }
+  }
+
+  // Legacy compatibility
+  const isDone   = (n)    => getStatus(n) === 'done';
+  const setDone  = (n, v) => setStatus(n, v ? 'done' : 'todo');
 
   const getNotes = (n)      => GM_getValue(notesKey(n), '');
   const setNotes = (n, md)  => {
     GM_setValue(notesKey(n), String(md ?? ''));
     cloudSchedulePush();
-    // Miroir public : appelé uniquement sur sauvegarde explicite (pas ici)
   };
 
   const isCollapsedKey  = (k)    => !!GM_getValue(COLLAPSE_PREFIX + k, false);
@@ -331,28 +377,22 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       return { uid: j.localId, idToken: j.idToken };
     };
 
-    console.log('[UNESS-CLOUD] Tentative sign-up:', email);
     try {
       const j = await firebasePost(
         `${IDENTITY_URL}/accounts:signUp?key=${encodeURIComponent(apiKey)}`,
         { email, password: pin, returnSecureToken: true }
       );
-      console.log('[UNESS-CLOUD] Nouveau compte créé:', j.localId);
       return storeToken(j);
     } catch (signUpErr) {
       const msg = signUpErr.message || '';
-      console.log('[UNESS-CLOUD] Sign-up échoué:', msg);
       if (msg.includes('EMAIL_EXISTS') || msg.includes('DUPLICATE')) {
-        console.log('[UNESS-CLOUD] Compte existant, tentative sign-in...');
         try {
           const j = await firebasePost(
             `${IDENTITY_URL}/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
             { email, password: pin, returnSecureToken: true }
           );
-          console.log('[UNESS-CLOUD] Sign-in OK:', j.localId);
           return storeToken(j);
         } catch (signInErr) {
-          console.error('[UNESS-CLOUD] Sign-in échoué:', signInErr.message);
           throw signInErr;
         }
       }
@@ -422,7 +462,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   }
 
   function exportLocalState() {
-    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX];
+    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX, STATUS_PREFIX, DONE_DATE_PREFIX];
     const out = {};
     GM_listValues().forEach(k => {
       if (prefixes.some(p => k.startsWith(p))) out[k] = GM_getValue(k, null);
@@ -432,7 +472,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
   function importLocalState(obj) {
     if (!obj || typeof obj !== 'object') return;
-    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX];
+    const prefixes = [DONE_PREFIX, NOTES_PREFIX, COLLAPSE_PREFIX, STATUS_PREFIX, DONE_DATE_PREFIX];
     Object.entries(obj).forEach(([k, v]) => {
       if (prefixes.some(p => k.startsWith(p))) GM_setValue(k, v);
     });
@@ -501,23 +541,17 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     }, CFG.cloud.pushDebounceMs || 900);
   }
 
-
   // ══════════════════════════════════════════════════════════════════════════
-  // COMMUNITY NOTES — Cloud Functions proxy (clé OpenAI côté serveur)
+  // COMMUNITY NOTES
   // ══════════════════════════════════════════════════════════════════════════
-
   const FUNCTIONS_BASE = `https://europe-west1-${CFG.cloud.projectId}.cloudfunctions.net`;
   const MIGRATE_KEY    = 'uness_community_migrated_v1';
 
-  // ── Appel générique vers une Cloud Function callable (HTTPS) ──
   async function callFunction(name, payload) {
     const tok = await cloudEnsureSession();
     if (!tok) throw new Error('Non authentifié');
 
-    // Cloud Functions v2 : URL avec nom complet
     const url = `${FUNCTIONS_BASE}/${name}`;
-    console.log('[UNESS-CF] Appel:', name, url);
-
     const r = await fetch(url, {
       method:  'POST',
       headers: {
@@ -531,28 +565,23 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     let json;
     try { json = JSON.parse(text); } catch { json = {}; }
 
-    console.log('[UNESS-CF] Réponse', name, r.status, json);
-
     if (!r.ok || json?.error) {
       throw new Error(json?.error?.message || json?.error?.status || 'HTTP ' + r.status);
     }
-    // Cloud Functions v2 wraps result in { result: ... }
     return json?.result ?? json;
   }
 
-  // ── Migration one-shot : toutes les notes existantes → miroir public ──
   async function communityMigrateIfNeeded() {
     if (!cloudEnabled()) return;
     if (GM_getValue(MIGRATE_KEY, false)) return;
 
     try {
-      // Collecter toutes les notes locales
       const notes = {};
       GM_listValues().forEach(k => {
         if (!k.startsWith(NOTES_PREFIX)) return;
         const val = GM_getValue(k, '').trim();
         if (!val) return;
-        const num = k.replace(NOTES_PREFIX, ''); // ex: "001"
+        const num = k.replace(NOTES_PREFIX, '');
         notes[num] = val;
       });
 
@@ -561,16 +590,13 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         return;
       }
 
-      console.log(`[UNESS-COMMUNITY] Migration de ${Object.keys(notes).length} notes...`);
       await callFunction('migrateAllNotes', { notes });
       GM_setValue(MIGRATE_KEY, true);
-      console.log('[UNESS-COMMUNITY] Migration OK');
     } catch (e) {
-      console.warn('[UNESS-COMMUNITY] Migration échouée (retry au prochain chargement):', e.message);
+      console.warn('[UNESS-COMMUNITY] Migration échouée:', e.message);
     }
   }
 
-  // ── Miroir public à chaque sauvegarde de note ──
   async function publicNoteMirrorPush(sddN, md) {
     if (!cloudEnabled() || !sddN) return;
     try {
@@ -580,7 +606,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     }
   }
 
-  // ── Orchestrateur : chargement/génération du résumé communautaire ──
   async function communityNotesLoad(sddN, sddName, containerEl) {
     if (!cloudEnabled() || !sddN) return;
 
@@ -596,12 +621,10 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       containerEl.innerHTML = communitySummaryHTML(summary, noteCount, updatedAt);
     } catch (e) {
-      console.error('[UNESS-COMMUNITY] Erreur:', e);
       containerEl.innerHTML = communityErrorHTML(e.message);
     }
   }
 
-  // ── Rendu HTML du résumé — markdown libre rendu en HTML ──
   function communitySummaryHTML(summary, noteCount, updatedAt) {
     if (!summary || !summary.trim()) return communityEmptyHTML();
 
@@ -614,7 +637,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     return meta + communityMarkdownToHtml(summary);
   }
 
-  // ── Markdown → HTML simple, sans regex complexes ──
   function communityMarkdownToHtml(md) {
     if (!md) return '';
 
@@ -623,7 +645,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     let   inList = false;
 
     lines.forEach(function(line) {
-      // Titre ##
       if (line.startsWith('### ')) {
         if (inList) { html += '</ul>'; inList = false; }
         html += '<div style="font-size:var(--fs-small);font-weight:var(--fw-bold);color:var(--ac);margin:16px 0 6px;letter-spacing:.3px">'
@@ -643,7 +664,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         return;
       }
 
-      // Bullet point (- ou *)
       var bulletMatch = line.match(/^(\s*)[-*] (.+)$/);
       if (bulletMatch) {
         if (!inList) { html += '<ul style="margin:4px 0 10px 18px;padding:0;list-style:disc">'; inList = true; }
@@ -653,16 +673,13 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         return;
       }
 
-      // Ligne vide
       if (!line.trim()) {
         if (inList) { html += '</ul>'; inList = false; }
         return;
       }
 
-      // Ligne séparatrice tableau (---|---)
       if (/^\|[-:| ]+\|$/.test(line.trim())) return;
 
-      // Ligne tableau |col|col|
       if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
         if (inList) { html += '</ul>'; inList = false; }
         var cells = line.trim().slice(1, -1).split('|');
@@ -673,7 +690,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         return;
       }
 
-      // Paragraphe normal
       if (inList) { html += '</ul>'; inList = false; }
       html += '<p style="margin:6px 0;color:var(--text2);font-size:var(--fs-small);line-height:1.65">'
         + inlineMarkdown(line) + '</p>';
@@ -681,7 +697,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
     if (inList) html += '</ul>';
 
-    // Enrober les lignes <tr> dans un <table>
     html = html.replace(/(<tr>.*?<\/tr>)+/gs, function(match) {
       return '<div style="overflow-x:auto;margin:10px 0"><table style="width:100%;border-collapse:collapse">' + match + '</table></div>';
     });
@@ -726,88 +741,49 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     const err  = (msg, e)           => console.error(`❌ [UNESS-CLOUD] ${msg}`, e ?? '');
 
     log('🔍', '=== DEBUG FIREBASE START ===');
-    log('⚙️ ', 'Config cloud:', {
-      enabled:   CFG.cloud.enabled,
-      apiKey:    CFG.cloud.apiKey?.slice(0, 12) + '...',
-      projectId: CFG.cloud.projectId,
-    });
     log('✅', 'cloudEnabled():', cloudEnabled());
     if (!cloudEnabled()) { warn('Cloud désactivé ou config manquante. Arrêt.'); return; }
 
     const username = getCloudUsername();
     const pin      = getCloudPin();
     log('👤', 'Username stocké:', username || '(vide)');
-    log('🔑', 'PIN stocké:', pin ? '***' + pin.slice(-1) : '(vide)');
 
     const tok = loadToken();
     log('🎟️ ', 'Token actuel:', {
-      uid:       tok?.uid || '(aucun)',
-      hasToken:  !!tok?.idToken,
-      expiresAt: tok?.expiresAt ? new Date(tok.expiresAt).toLocaleTimeString() : '(aucun)',
-      expired:   tok?.expiresAt ? Date.now() > tok.expiresAt : true,
+      uid:      tok?.uid || '(aucun)',
+      hasToken: !!tok?.idToken,
+      expired:  tok?.expiresAt ? Date.now() > tok.expiresAt : true,
     });
 
     log('🔄', 'Test refresh token...');
     try {
       const refreshed = await cloudRefreshIfNeeded();
       if (refreshed?.idToken) log('✅', 'Refresh OK — uid:', refreshed.uid);
-      else warn('Refresh retourné vide — pas de refreshToken valide.');
+      else warn('Refresh retourné vide.');
     } catch (e) { err('Refresh échoué:', e); }
 
-    if (username && pin) {
-      log('🔐', 'Test sign-in Firebase...');
-      try {
-        const result = await cloudSignInOrSignUp(username, pin);
-        log('✅', 'Sign-in OK — uid:', result?.uid);
-      } catch (e) { err('Sign-in échoué:', e); }
-    } else {
-      warn('Username ou PIN manquant — sign-in non testé.');
-    }
-
-    log('🧩', 'Test cloudEnsureSession()...');
-    try {
-      const session = await cloudEnsureSession();
-      if (session?.idToken) log('✅', 'Session OK — uid:', session.uid);
-      else warn('Session retournée nulle (user a peut-être annulé le prompt).');
-    } catch (e) { err('cloudEnsureSession() échoué:', e); }
-
-    log('📥', 'Test cloudPull() (lecture Firestore)...');
+    log('📥', 'Test cloudPull()...');
     try {
       const data = await cloudPull();
-      if (data === null) log('ℹ️ ', 'Pull OK mais document inexistant (404) — normal au 1er usage.');
-      else {
-        const keys = Object.keys(data);
-        log('✅', `Pull OK — ${keys.length} clés récupérées:`, keys.slice(0, 10));
-      }
+      if (data === null) log('ℹ️ ', 'Pull OK — document inexistant (1er usage).');
+      else log('✅', `Pull OK — ${Object.keys(data).length} clés`);
     } catch (e) { err('cloudPull() échoué:', e); }
 
-    log('📤', 'Test cloudPush() (écriture Firestore)...');
+    log('📤', 'Test cloudPush()...');
     try {
-      const local = exportLocalState();
-      const nKeys = Object.keys(local).length;
-      log('ℹ️ ', `Données locales à pousser: ${nKeys} clés`);
-      await cloudPush(local);
+      await cloudPush(exportLocalState());
       log('✅', 'Push OK');
     } catch (e) { err('cloudPush() échoué:', e); }
 
-    log('💾', 'État local (Tampermonkey):');
-    const allKeys = GM_listValues();
-    const doneKeys     = allKeys.filter(k => k.startsWith('uness_sdd_done_v1_'));
-    const notesKeys    = allKeys.filter(k => k.startsWith('uness_sdd_notes_v1_'));
-    const collapseKeys = allKeys.filter(k => k.startsWith('uness_sdd_collapse_v1_'));
-    log('📊', `  done: ${doneKeys.length}, notes: ${notesKeys.length}, collapse: ${collapseKeys.length}`);
-    const doneSamples = doneKeys.filter(k => GM_getValue(k, false)).slice(0, 5);
-    if (doneSamples.length) log('✅', '  SDD faites (sample):', doneSamples.map(k => k.replace('uness_sdd_done_v1_', '')));
-
     log('🏁', '=== DEBUG FIREBASE END ===');
-    return '✅ Debug terminé — voir les logs ci-dessus';
+    return '✅ Debug terminé — voir les logs';
   };
 
   window.debugCloudReset = function () {
     setCloudUsername('');
     setCloudPin('');
     saveToken({});
-    console.log('🔄 [UNESS-CLOUD] Credentials réinitialisés. Recharge la page pour re-saisir username/PIN.');
+    console.log('🔄 [UNESS-CLOUD] Credentials réinitialisés.');
   };
 
   window.debugLocalState = function () {
@@ -825,11 +801,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     setCloudUsername('');
     setCloudPin('');
     saveToken({});
-    console.log('🔓 [UNESS-CLOUD] Déconnecté.');
     location.reload();
   };
 
-  // CSS commun du bouton logout (injecté dans les deux pages)
   const LOGOUT_BTN_CSS = `
     .btn-logout {
       padding: 4px 8px;
@@ -866,8 +840,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     && (path.includes('Situation_de_d') || fullHref.includes('Situation_de_d'));
   const isSDD  = /SDD-\d+/i.test(path) && !isList;
 
-  console.log('[UNESS-SDD] path:', path, '| isList:', isList, '| isSDD:', isSDD);
-
   if (isList) {
     showLoading();
     try {
@@ -897,7 +869,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     }
     return pageItems.map(item => {
       const tags = tagsForNum(item.num);
-      return { ...item, tags, family: tags[0] || '', done: isDone(item.num) };
+      // status/done are read fresh in render() per cycle — not cached here
+      return { ...item, tags, family: tags[0] || '', status: 'todo', done: false };
     });
   }
 
@@ -1076,30 +1049,36 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       /* ── Liste ── */
       main{padding:20px 40px 70px}
-      #list{display:flex;flex-direction:column;gap:7px}
+      #list{display:flex;flex-direction:column;gap:6px}
 
       .row{
         display:grid;
-        grid-template-columns:96px 10px 1fr auto 32px 18px;
+        grid-template-columns:104px 1fr auto 26px 18px;
         align-items:center;gap:12px;
-        padding:11px 16px;
+        padding:10px 16px;
         background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
         text-decoration:none;color:var(--text);
         box-shadow:var(--sh);
-        transition:box-shadow var(--transition),border-color var(--transition),
-                   background var(--transition),transform var(--transition);
       }
-      .row:hover{border-color:var(--border2);box-shadow:var(--sh2);background:#fafcff;transform:translateY(-1px)}
+      .row:hover{border-color:var(--border2);background:#fafcff}
 
+      /* Numéro avec point de statut intégré */
       .row-num{
         font-size:var(--fs-rownum);font-weight:var(--fw-bold);
         color:var(--muted);font-variant-numeric:tabular-nums;
+        display:flex;align-items:center;gap:5px;
       }
-      .row-dot{width:8px;height:8px;border-radius:50%;justify-self:center;flex-shrink:0}
+      .row-num::before{
+        content:'';display:inline-block;
+        width:7px;height:7px;border-radius:50%;flex-shrink:0;
+        background:#cbd5e1;
+      }
+      .row-inprogress .row-num::before{background:#fb923c}
+      .row-done       .row-num::before{background:#34d399}
+
       .row-name{
         font-size:var(--fs-row);font-weight:var(--fw-med);color:var(--text2);
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
-        transition:color var(--transition);
       }
       .row:hover .row-name{color:var(--ac)}
 
@@ -1109,25 +1088,23 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         padding:3px 9px;border-radius:999px;white-space:nowrap;flex-shrink:0;
       }
 
-      .row-arr{color:var(--border2);font-size:17px;justify-self:end;transition:color var(--transition)}
+      .row-arr{color:var(--border2);font-size:17px;justify-self:end}
       .row:hover .row-arr{color:var(--ac)}
 
+      /* Checkbox — style indigo original, sans effets lourds */
       .row-ck{
         width:26px;height:26px;border-radius:var(--r-sm);
         border:1.5px solid var(--border2);
         display:grid;place-items:center;
         color:transparent;background:#fff;cursor:pointer;
         user-select:none;font-size:15px;font-weight:var(--fw-bold);
-        transition:all var(--transition);flex-shrink:0;
+        flex-shrink:0;
       }
-      .row-ck:hover{border-color:var(--ac);box-shadow:var(--sh-focus)}
-      .row-ck.on{
-        background:var(--ac);border-color:var(--ac);color:#fff;
-        box-shadow:0 4px 12px rgba(79,70,229,.3);
-      }
+      .row-ck:hover{border-color:var(--ac)}
+      .row-ck.on{background:var(--ac);border-color:var(--ac);color:#fff}
+
       .row-done .row-name{color:var(--muted);text-decoration:line-through}
-      .row-done .row-num{opacity:.6}
-      .row-done .row-dot{opacity:.4}
+      .row-done .row-num{opacity:.55}
 
       .no-results{
         text-align:center;padding:70px 20px;color:var(--muted);
@@ -1141,7 +1118,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       /* ── Responsive ── */
       @media(max-width:640px){
         header,.ctrl,main{padding-left:14px;padding-right:14px}
-        .row{grid-template-columns:86px 10px 1fr 28px 16px}
+        .row{grid-template-columns:90px 1fr 26px 16px}
         .row-tags{display:none}
         select{max-width:200px}
       }
@@ -1177,6 +1154,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <select id="st" title="Filtrer par statut">
         <option value="all">Toutes</option>
         <option value="todo">À faire</option>
+        <option value="inprogress">En cours</option>
         <option value="done">Faites ✓</option>
       </select>
 
@@ -1184,6 +1162,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         <button class="on" data-s="num">N° ↑</button>
         <button data-s="alpha">A – Z</button>
         ${hasFamilies ? `<button data-s="family">Spécialité</button>` : ''}
+        <button data-s="chrono">Récent</button>
       </div>
 
       <span id="stats"></span>
@@ -1199,78 +1178,163 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     // État de la vue
     let sort = 'num', query = '', status = 'all', family = '';
 
-    function render() {
-      items.forEach(i => { i.done = isDone(i.num); });
+    // ── Snapshot statuts + dates en mémoire (évite GM_getValue x356 par render) ──
+    // Chargé une fois, mis à jour au clic uniquement
+    const _st  = new Map(); // num → 'todo'|'inprogress'|'done'
+    const _dd  = new Map(); // num → ISO string | ''
+    for (const item of items) {
+      const s = getStatus(item.num);
+      _st.set(item.num, s);
+      _dd.set(item.num, s !== 'todo' ? (getDoneDate(item.num) || '') : '');
+    }
+    const snapStatus   = (n) => _st.get(n) || 'todo';
+    const snapDoneDate = (n) => _dd.get(n) || '';
+    function commitStatus(n, next) {
+      setStatus(n, next);                            // écrit en GM + cloud
+      _st.set(n, next);
+      _dd.set(n, next === 'done' ? (getDoneDate(n) || '') : '');
+    }
 
+    // ── Pré-calcul pills HTML (stable entre renders, basé sur tags seulement) ──
+    const _pillsCache = new Map();
+    function pillsHTML(item) {
+      if (_pillsCache.has(item.num)) return _pillsCache.get(item.num);
+      const tags = item.tags || [];
+      let html = '';
+      for (let i = 0; i < Math.min(tags.length, 2); i++) {
+        const tc = getFamilyColor(tags[i]);
+        html += `<span class="row-pill" style="background:${tc.pill};color:${tc.text}">${escapeHtml(tags[i])}</span>`;
+      }
+      _pillsCache.set(item.num, html);
+      return html;
+    }
+
+    // ── Pré-calcul numéro texte (stable) ──
+    const _numStr = new Map();
+    for (const item of items) _numStr.set(item.num, `SDD-${pad3(item.num)}`);
+
+    // ── Pré-calcul nom en minuscules pour la recherche ──
+    const _nameLower = new Map();
+    for (const item of items) _nameLower.set(item.num, item.name.toLowerCase());
+
+    // ── Tags en minuscules pré-calculés ──
+    const _tagsLower = new Map();
+    for (const item of items) _tagsLower.set(item.num, (item.tags||[]).map(t => t.toLowerCase()));
+
+    // ── Pré-calcul HTML complet de chaque row (nom + pills, partie stable) ──
+    // La partie variable (status, ck) est injectée séparément
+    const _rowStableHTML = new Map();
+    for (const item of items) {
+      _rowStableHTML.set(item.num,
+        `<span class="row-num">${_numStr.get(item.num)}</span>` +
+        `<span class="row-name">${escapeHtml(item.name)}</span>` +
+        `<span class="row-tags">${pillsHTML(item)}</span>`
+      );
+    }
+
+    // ── Debounce recherche ──
+    let _searchTimer = null;
+    function scheduleRender() {
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(render, 200);
+    }
+
+    function render() {
       const q = query.toLowerCase();
-      let filtered = items.filter(item => {
-        const tags = item.tags || [];
-        if (q && !item.name.toLowerCase().includes(q)
-               && !String(item.num).includes(q)
-               && !tags.some(t => t.toLowerCase().includes(q))) return false;
-        if (status === 'done' && !item.done) return false;
-        if (status === 'todo' &&  item.done) return false;
-        if (family && !tags.includes(family)) return false;
-        return true;
-      });
+
+      const filtered = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const st = snapStatus(item.num);
+        item.status = st;
+
+        if (status !== 'all' && st !== status) continue;
+        if (family && !(item.tags || []).includes(family))   continue;
+        if (q) {
+          if (!_nameLower.get(item.num).includes(q)
+            && !String(item.num).includes(q)
+            && !_tagsLower.get(item.num).some(t => t.includes(q))) continue;
+        }
+        filtered.push(item);
+      }
 
       if (sort === 'num')    filtered.sort((a, b) => a.num - b.num);
       if (sort === 'alpha')  filtered.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
       if (sort === 'family') filtered.sort((a, b) =>
         (a.family || 'zzz').localeCompare(b.family || 'zzz', 'fr') || a.num - b.num
       );
+      if (sort === 'chrono') {
+        // Ordre : en cours (récent→ancien) > fait (récent→ancien) > à faire (num↑)
+        const rank = s => s === 'inprogress' ? 0 : s === 'done' ? 1 : 2;
+        filtered.sort((a, b) => {
+          const ra = rank(a.status), rb = rank(b.status);
+          if (ra !== rb) return ra - rb;
+          if (ra === 2) return a.num - b.num; // à faire : ordre numérique
+          // en cours et fait : date décroissante (plus récent en premier)
+          const da = snapDoneDate(a.num);
+          const db = snapDoneDate(b.num);
+          if (da && db) return db < da ? -1 : db > da ? 1 : 0;
+          if (da) return -1;
+          if (db) return 1;
+          return a.num - b.num;
+        });
+      }
 
-      document.getElementById('stats').textContent = `${filtered.length} / ${items.length}`;
+      statsEl.textContent = `${filtered.length} / ${items.length}`;
 
       if (!filtered.length) {
-        list.innerHTML = `<div class="no-results"><span>🔍</span>Aucune situation trouvée.</div>`;
+        list.innerHTML = '<div class="no-results"><span>🔍</span>Aucune situation trouvée.</div>';
         return;
       }
 
-      const frag = document.createDocumentFragment();
-      filtered.forEach(item => {
-        const tags = item.tags || [];
-        const c = getFamilyColor(item.family);
+      // Construire tous les nœuds dans un seul innerHTML sur un div wrapper
+      // évite 356x createElement + setAttribute
+      let html = '';
+      const itemsRef = []; // référence pour les event handlers
+      for (let i = 0; i < filtered.length; i++) {
+        const item = filtered[i];
+        const st   = item.status;
+        const dd   = snapDoneDate(item.num);
+        const tip  = dd ? `Fait le ${formatDoneDate(dd, true)}` : (st === 'done' ? 'Marquer comme à faire' : 'Marquer comme faite');
+        const cls  = st === 'done' ? 'row row-done' : st === 'inprogress' ? 'row row-inprogress' : 'row';
+        itemsRef.push(item);
+        html +=
+          `<a class="${cls}" href="${escapeHtml(item.href)}" data-i="${i}">` +
+          _rowStableHTML.get(item.num) +
+          `<span class="row-ck${st === 'done' ? ' on' : ''}" title="${escapeHtml(tip)}">${st === 'done' ? '✓' : ''}</span>` +
+          `<span class="row-arr">›</span></a>`;
+      }
+      list.innerHTML = html;
 
-        const a = document.createElement('a');
-        a.className = `row${item.done ? ' row-done' : ''}`;
-        a.href = item.href;
+      // Un seul listener délégué sur #list pour toutes les coches
+      list.onclick = function(ev) {
+        if (!ev.target.classList.contains('row-ck')) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const a    = ev.target.closest('a');
+        if (!a) return;
+        const i    = parseInt(a.dataset.i, 10);
+        const item = itemsRef[i];
+        const cur  = snapStatus(item.num);
+        const next = cur === 'done' ? 'todo' : 'done';
+        commitStatus(item.num, next);
+        item.status = next;
 
-        const pillsHTML = tags.slice(0, 2).map(t => {
-          const tc = getFamilyColor(t);
-          return `<span class="row-pill" style="background:${tc.pill};color:${tc.text}">${escapeHtml(t)}</span>`;
-        }).join('');
+        if (status !== 'all') { render(); return; }
 
-        a.innerHTML = `
-          <span class="row-num">SDD-${pad3(item.num)}</span>
-          <span class="row-dot" style="background:${c.dot}"></span>
-          <span class="row-name">${escapeHtml(item.name)}</span>
-          <span class="row-tags">${pillsHTML}</span>
-          <span class="row-ck ${item.done ? 'on' : ''}" title="${item.done ? 'Marquer comme à faire' : 'Marquer comme faite'}">${item.done ? '✓' : ''}</span>
-          <span class="row-arr">›</span>`;
-
-        a.querySelector('.row-ck').addEventListener('click', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          item.done = !item.done;
-          setDone(item.num, item.done);
-          if (status !== 'all') { render(); return; }
-          const ck = a.querySelector('.row-ck');
-          ck.classList.toggle('on', item.done);
-          ck.textContent = item.done ? '✓' : '';
-          ck.title = item.done ? 'Marquer comme à faire' : 'Marquer comme faite';
-          a.classList.toggle('row-done', item.done);
-        });
-
-        frag.appendChild(a);
-      });
-
-      list.innerHTML = '';
-      list.appendChild(frag);
+        const ck  = ev.target;
+        const newDd  = snapDoneDate(item.num);
+        const newTip = newDd ? `Fait le ${formatDoneDate(newDd, true)}` : (next === 'done' ? 'Marquer comme à faire' : 'Marquer comme faite');
+        ck.className  = next === 'done' ? 'row-ck on' : 'row-ck';
+        ck.textContent = next === 'done' ? '✓' : '';
+        ck.title = newTip;
+        a.className = next === 'done' ? 'row row-done' : 'row';
+      };
     }
 
-    // Events
-    document.getElementById('search').addEventListener('input', e => { query = e.target.value; render(); });
+    // Events — search debounced, filters immédiats
+    const statsEl = document.getElementById('stats');
+    document.getElementById('search').addEventListener('input', e => { query = e.target.value; scheduleRender(); });
     document.getElementById('st').addEventListener('change', e => { status = e.target.value; render(); });
     if (hasFamilies) document.getElementById('ff').addEventListener('change', e => { family = e.target.value; render(); });
 
@@ -1288,14 +1352,12 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       location.reload();
     });
 
-    // Bouton logout liste
     document.getElementById('btn-logout')?.addEventListener('click', () => {
       if (confirm('Se déconnecter du cloud sync ?\n\nUsername et PIN seront effacés localement. Tes données restent sur le cloud.')) {
         window.cloudDisconnect();
       }
     });
 
-    // Raccourci "/" pour focus recherche
     document.addEventListener('keydown', e => {
       if (e.key === '/' && document.activeElement?.id !== 'search') {
         e.preventDefault();
@@ -1385,7 +1447,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         overflow-y:auto;
       }
 
-      /* ── Resize handle colonne notes ── */
+      /* ── Resize handle ── */
       #notes-resize-handle{
         position:absolute;top:0;right:-5px;width:10px;height:100%;
         cursor:col-resize;z-index:10;
@@ -1397,9 +1459,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         transition:background var(--transition);
       }
       #notes-resize-handle:hover::after,
-      #notes-resize-handle.dragging::after{
-        background:var(--ac);
-      }
+      #notes-resize-handle.dragging::after{background:var(--ac)}
+
       /* ── Cards ── */
       .sc{
         background:var(--surface);border:1px solid var(--border);
@@ -1422,6 +1483,14 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         margin-left:auto;font-size:15px;color:var(--muted);
         transition:transform var(--transition);
       }
+      .sc-head-date{
+        font-size:10px;font-weight:var(--fw-med);
+        color:var(--success);letter-spacing:.3px;
+        background:var(--success-light);
+        padding:2px 7px;border-radius:999px;
+        margin-left:4px;
+        text-transform:none;
+      }
       .sc.collapsed .sc-toggle{transform:rotate(-90deg)}
       .sc.collapsed .sc-body{display:none}
 
@@ -1440,7 +1509,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         display:inline-block;border-radius:var(--r-sm);margin-bottom:6px;
       }
 
-      /* Table des attendus */
+      /* Table */
       .at{width:100%;border-collapse:collapse}
       .at thead th{
         padding:10px 12px;text-align:left;
@@ -1492,7 +1561,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       .att-ai-panel th,.att-ai-panel td{padding:5px 8px;border:1px solid var(--border);text-align:left}
       .att-ai-panel th{background:var(--surface2);font-weight:var(--fw-semi)}
 
-      /* ── Boutons dans la card notes ── */
+      /* ── Boutons card notes ── */
       .md-btn{
         padding:7px 12px;border:1px solid var(--border);border-radius:var(--r-sm);
         background:#fff;cursor:pointer;font-family:inherit;
@@ -1506,26 +1575,35 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       .md-btn.primary:hover{background:var(--ac-dark);border-color:var(--ac-dark)}
 
-      /* Checkbox "SDD faite" */
-      .done-label{
-        display:flex;align-items:center;gap:10px;cursor:pointer;
-        user-select:none;margin-bottom:12px;
-        padding:10px 12px;border-radius:var(--r-sm);
-        border:1px solid var(--border);background:var(--surface2);
-        transition:all var(--transition);
+      /* ── Sélecteur 3 états (page SDD) ── */
+      .status-picker{
+        display:flex;gap:0;margin-bottom:14px;
+        border:1px solid var(--border);border-radius:var(--r-sm);
+        overflow:hidden;
       }
-      .done-label:hover{border-color:var(--ac);background:var(--ac-light)}
-      .done-label input[type=checkbox]{
-        width:18px;height:18px;accent-color:var(--ac);cursor:pointer;
+      .status-btn{
+        flex:1;padding:9px 6px;
+        border:none;border-right:1px solid var(--border);
+        background:#fff;
+        font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);
+        cursor:pointer;color:var(--muted);
+        transition:background var(--transition),color var(--transition);
+        display:flex;align-items:center;justify-content:center;gap:5px;
+        white-space:nowrap;
       }
-      .done-label span{font-size:var(--fs-base);font-weight:var(--fw-semi);color:var(--text)}
+      .status-btn:last-child{border-right:none}
+      .status-btn:hover{background:var(--surface2);color:var(--text)}
 
-
+      .status-btn.active-todo{background:var(--surface2);color:var(--text2)}
+      .status-btn.active-inprogress{background:var(--inprogress-light);color:var(--inprogress);font-weight:var(--fw-bold)}
+      .status-btn.active-done{background:var(--success-light);color:var(--success);font-weight:var(--fw-bold)}
 
       /* ── Bouton logout ── */
       ${LOGOUT_BTN_CSS}
 
-      /* ── FIX MOBILE ── */
+      @keyframes spin{to{transform:rotate(360deg)}}
+
+      /* ── Mobile ── */
       @media(max-width:${CFG.breakpointOneCol}px){
         #sdd-bc,#sdd-top{padding-left:14px;padding-right:14px}
         #sdd-body{
@@ -1543,7 +1621,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     async function bootSDD() {
       if (cloudEnabled()) {
         try { const r = await cloudPull(); if (r) importLocalState(r); } catch (_) {}
-        // Migration one-shot des notes existantes vers le miroir public
         communityMigrateIfNeeded().catch(() => {});
       }
       let attempts = 0;
@@ -1567,7 +1644,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
   function buildSDD() {
     const tables = document.querySelectorAll('.navbox table');
-    console.log('[UNESS-SDD] buildSDD() tables trouvées:', tables.length);
 
     const fullTitle = document.querySelector('#firstHeading')?.textContent?.trim() || document.title;
     const numMatch  = fullTitle.match(/SDD-(\d+)/i);
@@ -1644,7 +1720,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <a id="sdd-top-back" href="/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part">← Liste SDD</a>`;
     document.body.appendChild(top);
 
-    // Bouton logout breadcrumb SDD
     document.getElementById('btn-logout-sdd')?.addEventListener('click', () => {
       if (confirm('Se déconnecter du cloud sync ?\n\nUsername et PIN seront effacés localement. Tes données restent sur le cloud.')) {
         window.cloudDisconnect();
@@ -1663,7 +1738,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       div.innerHTML = `
         <div class="sc-head">
           <div class="sc-dot" style="background:${dotColor}"></div>
-          ${escapeHtml(title)}
+          <span class="sc-head-label">${escapeHtml(title)}</span>
           <span class="sc-toggle">▾</span>
         </div>
         <div class="sc-body">${innerHTML}</div>`;
@@ -1677,9 +1752,8 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       ).join('')}</div>`;
     }
 
-      function attTable(rows, tableKey) {
+    function attTable(rows, tableKey) {
       if (!rows.length) return '<p style="color:var(--muted);font-size:var(--fs-base);font-style:italic">Aucun attendu.</p>';
-      const uid = (loadToken() || {}).uid || 'anon';
       return '<table class="at"><thead><tr>' +
         '<th style="width:55%">Attendu</th>' +
         '<th style="width:25%">Domaines</th>' +
@@ -1708,7 +1782,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         '</tbody></table>';
     }
 
-    // Colonne droite : contenu
+    // Colonne droite
     const content = document.createElement('div');
     content.style.cssText = 'display:flex;flex-direction:column;gap:16px;min-width:0';
 
@@ -1720,23 +1794,21 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       content.appendChild(card('Items de connaissance', '#6366f1', html, 'items'));
     }
 
-      if (att_famille.length)    content.appendChild(card(`Attendus — ${famille || 'Famille'}`, '#10b981', attTable(att_famille,    'famille'),    'att_famille'));
-      if (att_specifique.length) content.appendChild(card('Attendus spécifiques',               '#3b82f6', attTable(att_specifique, 'specifique'), 'att_specifique'));
-      if (att_stage.length)      content.appendChild(card('Valorisation du stage',              '#f59e0b', attTable(att_stage,      'stage'),      'att_stage'));
+    if (att_famille.length)    content.appendChild(card(`Attendus — ${famille || 'Famille'}`, '#10b981', attTable(att_famille,    'famille'),    'att_famille'));
+    if (att_specifique.length) content.appendChild(card('Attendus spécifiques',               '#3b82f6', attTable(att_specifique, 'specifique'), 'att_specifique'));
+    if (att_stage.length)      content.appendChild(card('Valorisation du stage',              '#f59e0b', attTable(att_stage,      'stage'),      'att_stage'));
+
     // Colonne gauche : notes
     const follow = document.createElement('div');
     follow.id = 'sdd-follow';
 
-    // ── Resize handle ──
     const resizeHandle = document.createElement('div');
     resizeHandle.id = 'notes-resize-handle';
     follow.appendChild(resizeHandle);
 
-    // Restore saved width
     const savedW = parseInt(GM_getValue('uness_notes_col_width', CFG.notesColWidth), 10);
     document.documentElement.style.setProperty('--notes-col', savedW + 'px');
 
-    // Drag to resize
     let _dragStartX = 0, _dragStartW = 0;
     resizeHandle.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -1762,11 +1834,17 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
     if (sddN != null) {
       const notesCollapsed = isCollapsedKey(`sdd_${sddN}_notes`);
+      const currentStatus  = getStatus(sddN);
+      const doneDate       = getDoneDate(sddN);
+      const doneDateStr    = doneDate ? formatDoneDate(doneDate) : '';
+
       const notesHTML = [
-        '<label class="done-label" id="done-wrap">',
-        '  <input id="sdd-done" type="checkbox">',
-        '  <span>SDD faite</span>',
-        '</label>',
+        // ── 3-state status picker ──
+        '<div class="status-picker" id="status-picker">',
+        '  <button class="status-btn" data-st="todo" title="À faire">À faire</button>',
+        '  <button class="status-btn" data-st="inprogress" title="En cours">🔄 En cours</button>',
+        '  <button class="status-btn" data-st="done" title="Faite">✓ Faite</button>',
+        '</div>',
         '<textarea id="md-area" spellcheck="false" style="' +
           'width:100%;min-height:220px;max-height:60vh;resize:vertical;' +
           'padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);' +
@@ -1781,28 +1859,69 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         '  <span id="md-status" style="margin-left:auto;font-size:var(--fs-tiny);color:var(--muted)"></span>',
         '</div>',
       ].join('\n');
-      const noteCard = card('Suivi & notes', '#4f46e5', notesHTML, 'notes');
 
-      if (notesCollapsed) noteCard.classList.add('collapsed');
+      // Card titre initial avec date si déjà faite
+      const noteCardTitle = 'Suivi & notes';
+      const noteCard = card(noteCardTitle, '#4f46e5', notesHTML, 'notes');
 
-      const doneEl  = noteCard.querySelector('#sdd-done');
-      const saveBtn = noteCard.querySelector('#md-save');
+      // Inject date badge into head if done
+      const headLabel = noteCard.querySelector('.sc-head-label');
+      const dateBadge = document.createElement('span');
+      dateBadge.className = 'sc-head-date';
+      dateBadge.id = 'notes-date-badge';
+      if (currentStatus === 'done' && doneDateStr) {
+        dateBadge.textContent = doneDateStr;
+        dateBadge.style.display = '';
+      } else {
+        dateBadge.style.display = 'none';
+      }
+      headLabel.after(dateBadge);
+
       const togEl   = noteCard.querySelector('#md-toggle');
       const statEl  = noteCard.querySelector('#md-status');
       const areaEl  = noteCard.querySelector('#md-area');
       const prevEl  = noteCard.querySelector('#md-prev');
+      const picker  = noteCard.querySelector('#status-picker');
 
-      doneEl.checked = isDone(sddN);
-      areaEl.value   = getNotes(sddN);
+      areaEl.value = getNotes(sddN);
 
-      const setStatus = (txt) => { statEl.textContent = txt; };
+      // Init status buttons
+      function applyStatus(st) {
+        picker.querySelectorAll('.status-btn').forEach(btn => {
+          btn.classList.remove('active-todo', 'active-inprogress', 'active-done');
+          if (btn.dataset.st === st) btn.classList.add(`active-${st}`);
+        });
+        // Update date badge
+        const dd     = getDoneDate(sddN);
+        const ddStr  = dd ? formatDoneDate(dd) : '';
+        const badge  = noteCard.querySelector('#notes-date-badge');
+        if (st === 'done' && ddStr) {
+          badge.textContent = ddStr;
+          badge.style.display = '';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+
+      applyStatus(currentStatus);
+
+      picker.querySelectorAll('.status-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const st = btn.dataset.st;
+          setStatus(sddN, st);
+          applyStatus(st);
+        });
+      });
+
+      const setStatus2 = (txt) => { statEl.textContent = txt; };
 
       const saveNow = () => {
         setNotes(sddN, areaEl.value);
         publicNoteMirrorPush(sddN, areaEl.value).catch(() => {});
-        setStatus('Sauvé ✓');
+        setStatus2('Sauvé ✓');
         clearTimeout(saveNow._t);
-        saveNow._t = setTimeout(() => setStatus(''), 1400);
+        saveNow._t = setTimeout(() => setStatus2(''), 1400);
       };
 
       areaEl.addEventListener('focus', () => {
@@ -1814,13 +1933,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         areaEl.style.boxShadow   = 'none';
       });
 
-      // saveBtn removed — save via Ctrl+S or autosave
-      doneEl.addEventListener('change', () => setDone(sddN, doneEl.checked));
-      noteCard.querySelector('#done-wrap').addEventListener('click', e => e.stopPropagation());
-
       let autoTimer = null;
       areaEl.addEventListener('input', () => {
-        setStatus('…');
+        setStatus2('…');
         clearTimeout(autoTimer);
         autoTimer = setTimeout(() => {
           saveNow();
@@ -1873,7 +1988,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       follow.appendChild(err);
     }
 
-    // ── Encart Notes de la communauté (sous la card suivi&notes) ──
+    // ── Encart Notes de la communauté ──
     if (sddN != null) {
       const commCard = document.createElement('div');
       commCard.className = 'sc';
@@ -1883,7 +1998,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       commCard.innerHTML = `
         <div class="sc-head">
           <div class="sc-dot" style="background:linear-gradient(135deg,#6366f1,#d97706)"></div>
-          Notes de la communauté
+          <span class="sc-head-label">Notes de la communauté</span>
           <span style="margin-left:6px;font-size:10px;background:#eef2ff;color:#4f46e5;
             padding:2px 6px;border-radius:999px;font-weight:var(--fw-bold);letter-spacing:.5px">IA</span>
           <span class="sc-toggle">▾</span>
@@ -1891,13 +2006,11 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         <div class="sc-body" id="community-body"></div>`;
       follow.appendChild(commCard);
 
-      // Lancer le chargement si pas collapsed
       const commBody = commCard.querySelector('#community-body');
       if (!commCollapsed) {
         communityNotesLoad(sddN, sddName, commBody);
       }
 
-      // Si on expand manuellement et que c'est vide → déclencher
       commCard.querySelector('.sc-head').addEventListener('click', (e) => {
         if (e.target.closest('button,input,textarea,select,a,label')) return;
         const nowCollapsed = commCard.classList.toggle('collapsed');
@@ -1936,13 +2049,9 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         btn.textContent = '✦';
       };
 
-      // Toggle si déjà visible
       if (panel.classList.contains('visible')) { hidePanel(); return; }
-
-      // Déjà du contenu en cache DOM → juste afficher
       if (panel.innerHTML.trim()) { showPanel(); return; }
 
-      // Appel Cloud Function
       btn.classList.add('loading');
       btn.textContent = '…';
       if (panelRow) panelRow.style.display = '';
@@ -1967,7 +2076,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       head.addEventListener('click', (e) => {
         if (e.target.closest('button,input,textarea,select,a,label')) return;
-        if (key === 'community') return; // géré séparément ci-dessus
+        if (key === 'community') return;
         const collapsed = sc.classList.toggle('collapsed');
         setCollapsedKey(`sdd_${sddN}_${key}`, collapsed);
       });
