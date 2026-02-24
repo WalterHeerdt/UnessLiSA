@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         UNESS – SDD Enhanced (Liste + Pages) — DONE + Notes + Collapse + Font vars + Cloud Sync (Firebase) + Auto-update
+// @name         UNESS – Fonctionnalité complète
 // @namespace    http://tampermonkey.net/
-// @version      7.5
+// @version      10.0
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -16,6 +16,9 @@
 // @grant        GM_listValues
 // @grant        GM_deleteValue
 // @connect      firestore.googleapis.com
+// @connect      firebasestorage.googleapis.com
+// @connect      storage.googleapis.com
+// @connect      docs.google.com
 // @connect      identitytoolkit.googleapis.com
 // @connect      securetoken.googleapis.com
 // @connect      *.googleapis.com
@@ -104,7 +107,71 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   const reviewKey = (n) => REVIEW_PREFIX + pad3(n);
   // Stocke { lastReview: ISO, step: 0|1|2|3 } — paliers J+1/J+3/J+7/J+30
   const REVIEW_STEPS = [1, 3, 7, 30];
+function gsParse(gsUrl) {
+  const m = String(gsUrl || '').match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (!m) return null;
+  return { bucket: m[1], path: m[2] };
+}
 
+
+function normalizeToFirebaseEndpoint(u) {
+  const s = String(u || '').trim();
+
+  // gs://bucket/path -> firebasestorage
+  let m = s.match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (m) {
+    const bucket = m[1], path = m[2];
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+  }
+
+  // https://storage.googleapis.com/bucket/path -> firebasestorage
+  m = s.match(/^https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/);
+  if (m) {
+    const bucket = m[1], path = m[2];
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+  }
+
+  return s;
+}
+function makePublicHttpUrl(bucket, path) {
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+}
+
+// Essaie plusieurs buckets et retourne la 1ère URL qui ne fait pas 404/403
+async function resolvePublicEcosUrl(gsUrl) {
+  const p = gsParse(gsUrl);
+  if (!p) return '';
+
+  const candidates = [
+    p.bucket,                          // ex: uneisa-26e34.firebasestorage.app
+    `${CFG.cloud.projectId}.appspot.com`, // ex: uneisa-26e34.appspot.com
+  ];
+
+  for (const b of candidates) {
+    const u = makePublicHttpUrl(b, p.path);
+    try {
+      // HEAD suffit, plus rapide. Certains serveurs n’aiment pas HEAD -> fallback GET
+      let r = await fetch(u, { method: 'HEAD', mode: 'cors' });
+      if (r.status === 405 || r.status === 400) r = await fetch(u, { method: 'GET', mode: 'cors' });
+
+      if (r.ok) return u;                 // 200
+      if (r.status === 302 || r.status === 304) return u; // redir OK
+      // si 404/403, on tente le bucket suivant
+    } catch (_) {}
+  }
+
+  // Rien n'a marché -> on renvoie la 1ère pour debug
+  return makePublicHttpUrl(candidates[0], p.path);
+}
+function gsToPublicHttp(gsUrl) {
+  const m = String(gsUrl || '').match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (!m) return '';
+  const bucket = m[1];
+  const path   = m[2];
+
+  // ✅ endpoint Firebase Storage (applique les rules)
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+}
   function getReview(n) {
     try { return JSON.parse(GM_getValue(reviewKey(n), 'null')) || null; } catch { return null; }
   }
@@ -1284,7 +1351,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       <h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1>
       <button id="btn-stats" title="Statistiques &amp; progression">📊 Stats</button>
       <a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(hdr);
 
     // Barre de contrôle
@@ -1308,7 +1375,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         <option value="todo">À faire</option>
         <option value="inprogress">En cours</option>
         <option value="done">Faites ✓</option>
-        <option value="review">réviser</option>
+        <option value="review">🔔 À réviser</option>
       </select>
 
       <div class="sort-btns">
@@ -1927,19 +1994,71 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       .att-ai-panel th,.att-ai-panel td{padding:5px 8px;border:1px solid var(--border);text-align:left}
       .att-ai-panel th{background:var(--surface2);font-weight:var(--fw-semi)}
 
-      /* ── Boutons card notes ── */
-      .md-btn{
-        padding:7px 12px;border:1px solid var(--border);border-radius:var(--r-sm);
-        background:#fff;cursor:pointer;font-family:inherit;
-        font-size:var(--fs-small);font-weight:var(--fw-med);
-        color:var(--text2);transition:all var(--transition);
+      /* ── Éditeur WYSIWYG notes ── */
+      .wy-wrap{
+        border:1px solid var(--border);border-radius:var(--r-sm);
+        background:#fafcff;min-height:120px;
+        transition:border-color var(--transition);
+        position:relative;
       }
-      .md-btn:hover{border-color:var(--border2);background:var(--surface2);color:var(--text)}
-      .md-btn.primary{
-        background:var(--ac);border-color:var(--ac);color:#fff;
-        font-weight:var(--fw-semi);
+      .wy-wrap:focus-within{border-color:var(--ac);box-shadow:var(--sh-focus)}
+
+      /* Barre d'outils micro */
+      .wy-toolbar{
+        display:flex;gap:2px;padding:4px 6px;
+        border-bottom:1px solid var(--border);
+        background:#f8fafc;border-radius:var(--r-sm) var(--r-sm) 0 0;
       }
-      .md-btn.primary:hover{background:var(--ac-dark);border-color:var(--ac-dark)}
+      .wy-tb-btn{
+        padding:2px 7px;border:none;background:transparent;
+        border-radius:4px;cursor:pointer;font-family:inherit;
+        font-size:12px;color:var(--muted);line-height:1.6;
+        transition:background var(--transition),color var(--transition);
+      }
+      .wy-tb-btn:hover{background:var(--border);color:var(--text)}
+      .wy-tb-sep{width:1px;background:var(--border);margin:3px 2px;flex-shrink:0}
+
+      /* Zone éditable */
+      #wy-editor{
+        padding:10px 12px;outline:none;
+        min-height:100px;max-height:55vh;overflow-y:auto;
+        font-size:12px;line-height:1.5;color:var(--text2);
+        white-space:pre-wrap;word-break:break-word;
+      }
+      /* Rendu Markdown dans le WYSIWYG */
+      #wy-editor p{margin:.25em 0;line-height:1.5}
+      #wy-editor h1{font-size:15px;font-weight:700;margin:.6em 0 .2em;color:var(--text)}
+      #wy-editor h2{font-size:14px;font-weight:700;margin:.5em 0 .2em;color:var(--text)}
+      #wy-editor h3{font-size:13px;font-weight:600;margin:.4em 0 .15em;color:var(--text)}
+      #wy-editor ul,#wy-editor ol{margin:.2em 0 .4em 1.2em;padding:0;line-height:1.5}
+      #wy-editor li{margin-bottom:2px;font-size:12px}
+      #wy-editor strong{font-weight:700;color:var(--text)}
+      #wy-editor em{font-style:italic}
+      #wy-editor code{
+        font-family:ui-monospace,monospace;font-size:11px;
+        background:#f1f5f9;padding:1px 5px;border-radius:4px;
+        border:1px solid var(--border);
+      }
+      #wy-editor a{color:var(--ac);text-decoration:none}
+      #wy-editor a:hover{text-decoration:underline}
+      #wy-editor blockquote{
+        border-left:3px solid var(--border2);margin:.3em 0;
+        padding:.1em .6em;color:var(--muted);font-style:italic;font-size:12px;
+      }
+      #wy-editor hr{border:none;border-top:1px solid var(--border);margin:.5em 0}
+
+      /* Placeholder */
+      #wy-editor:empty::before{
+        content:attr(data-placeholder);color:var(--muted);
+        font-style:italic;pointer-events:none;font-size:12px;
+      }
+      /* Statut sauvegarde */
+      #wy-save-status{
+        font-size:10px;color:var(--muted);padding:3px 8px 4px;
+        text-align:right;border-top:1px solid var(--border);
+        background:#f8fafc;border-radius:0 0 var(--r-sm) var(--r-sm);
+        min-height:18px;
+      }
 
       /* ── Sélecteur 3 états (page SDD) ── */
       .status-picker{
@@ -1966,6 +2085,60 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
       /* ── Bouton logout ── */
       ${LOGOUT_BTN_CSS}
+
+      /* ── Card ECOS stations ── */
+      .ecos-list{display:flex;flex-direction:column;gap:7px}
+      .ecos-item{
+        display:flex;align-items:center;gap:10px;
+        padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);
+        background:var(--surface2);
+      }
+      .ecos-icon{
+        font-size:18px;flex-shrink:0;line-height:1;
+      }
+      .ecos-info{flex:1;min-width:0}
+      .ecos-name{
+        font-size:12px;font-weight:var(--fw-semi);color:var(--text2);
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      }
+      .ecos-meta{font-size:10px;color:var(--muted);margin-top:1px}
+      .ecos-actions{display:flex;gap:5px;flex-shrink:0}
+      .ecos-btn{
+        padding:4px 9px;border-radius:var(--r-sm);border:1px solid var(--border);
+        background:#fff;color:var(--text2);font-size:11px;font-weight:var(--fw-semi);
+        font-family:inherit;cursor:pointer;text-decoration:none;
+        display:inline-flex;align-items:center;gap:3px;
+        transition:border-color var(--transition),color var(--transition);
+      }
+      .ecos-btn:hover{border-color:var(--ac);color:var(--ac)}
+      .ecos-btn.primary{background:var(--ac);border-color:var(--ac);color:#fff}
+      .ecos-btn.primary:hover{background:var(--ac-dark);border-color:var(--ac-dark)}
+
+      /* Preview PDF plein écran */
+      #ecos-preview-backdrop{
+        position:fixed;inset:0;background:rgba(15,23,42,.7);
+        z-index:1000;display:flex;align-items:center;justify-content:center;
+        padding:20px;
+      }
+      #ecos-preview-panel{
+        width:min(900px,95vw);height:90vh;
+        background:#fff;border-radius:var(--r);overflow:hidden;
+        display:flex;flex-direction:column;box-shadow:var(--sh2);
+      }
+      #ecos-preview-head{
+        padding:10px 16px;border-bottom:1px solid var(--border);
+        display:flex;align-items:center;gap:10px;font-size:var(--fs-small);
+        font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff;
+      }
+      #ecos-preview-head a{
+        margin-left:auto;font-size:var(--fs-tiny);color:var(--ac);font-weight:var(--fw-semi);
+      }
+      #ecos-preview-head button{
+        background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted);
+        padding:2px 6px;border-radius:4px;
+      }
+      #ecos-preview-head button:hover{color:var(--text);background:var(--surface2)}
+      #ecos-preview-iframe{flex:1;border:none;width:100%}
 
       @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -2006,6 +2179,227 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootSDD);
     else bootSDD();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ECOS — chargement fichiers depuis Firestore + preview PDF
+  // ══════════════════════════════════════════════════════════════════════════
+
+async function loadEcosFiles(sddN) {
+  const tok = await cloudEnsureSession();
+  if (!tok) throw new Error('Non authentifié');
+
+  const url = `${firestoreBase()}/ecos/${sddN}/files`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${tok.idToken}` } });
+
+  if (r.status === 404) return [];
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Firestore ECOS HTTP ${r.status}${txt ? ': ' + txt.slice(0, 200) : ''}`);
+  }
+
+  const json = await r.json().catch(() => ({}));
+  const docs = json.documents || [];
+
+  function getField(fields, k) {
+    const fv = fields?.[k];
+    if (!fv) return '';
+    return fv.stringValue ?? fv.integerValue ?? fv.doubleValue ?? '';
+  }
+
+  const out = await Promise.all(docs.map(async (doc) => {
+    const f = doc.fields || {};
+
+let rawUrl = getField(f, 'url');
+rawUrl = normalizeToFirebaseEndpoint(rawUrl);
+
+    if (rawUrl && rawUrl.startsWith('gs://')) {
+      const resolved = await resolvePublicEcosUrl(rawUrl);
+      // utile pour debug :
+      // console.log('[ECOS] resolved', rawUrl, '->', resolved);
+      rawUrl = resolved;
+    }
+
+    return {
+      name:       getField(f, 'name'),
+      url:        rawUrl,
+      source:     getField(f, 'source'),
+      specialite: getField(f, 'specialite'),
+      sizeBytes:  parseInt(f.sizeBytes?.integerValue || '0', 10),
+    };
+  }));
+
+  return out.filter(d => d.name && d.url && /^https?:\/\//i.test(d.url));
+}
+
+function openEcosPreview(file) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Helpers : force toujours l’endpoint Firebase (pas storage.googleapis.com)
+  // ─────────────────────────────────────────────────────────────────────────
+  function normalizeToFirebaseEndpoint(u) {
+    const s = String(u || '').trim();
+
+    // gs://bucket/path -> firebasestorage
+    let m = s.match(/^gs:\/\/([^/]+)\/(.+)$/);
+    if (m) {
+      const bucket = m[1], path = m[2];
+      return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+    }
+
+    // https://storage.googleapis.com/bucket/path -> firebasestorage
+    m = s.match(/^https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/);
+    if (m) {
+      const bucket = m[1], path = m[2];
+      return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+    }
+
+    // déjà bon (ou autre) : on ne touche pas
+    return s;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // UI
+  // ─────────────────────────────────────────────────────────────────────────
+  const existing = document.getElementById('ecos-preview-backdrop');
+  if (existing) existing.remove();
+
+  // Normalise URL (évite IAM AccessDenied côté storage.googleapis.com)
+  const safeUrl = normalizeToFirebaseEndpoint(file?.url);
+
+  // Taille
+  const sizeMB = (file?.sizeBytes > 0)
+    ? ` · ${(file.sizeBytes / 1048576).toFixed(1)} Mo`
+    : '';
+
+  // Preview direct PDF (pas Google Docs Viewer)
+  // -> évite que Google refasse un fetch via storage.googleapis.com (IAM)
+  const iframeUrl = safeUrl;
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'ecos-preview-backdrop';
+
+  backdrop.innerHTML = `
+    <div id="ecos-preview-panel">
+      <div id="ecos-preview-head">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          📄 ${escapeHtml(file?.name || 'Document')}${escapeHtml(sizeMB)}
+        </span>
+
+        <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer"
+           style="font-size:11px;color:var(--ac);white-space:nowrap;margin:0 8px">
+          ↗ Ouvrir dans un onglet
+        </a>
+
+        <a href="${escapeHtml(safeUrl)}" download="${escapeHtml(file?.name || 'document.pdf')}"
+           style="font-size:11px;color:var(--ac);white-space:nowrap;margin-right:8px">
+          ⬇ Télécharger
+        </a>
+
+        <button id="ecos-preview-close" title="Fermer (Echap)">✕</button>
+      </div>
+
+      <iframe id="ecos-preview-iframe"
+        src="${escapeHtml(iframeUrl)}"
+        title="${escapeHtml(file?.name || 'Document')}"
+        allow="fullscreen"
+        referrerpolicy="no-referrer">
+      </iframe>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+
+  const close = () => backdrop.remove();
+  backdrop.querySelector('#ecos-preview-close').addEventListener('click', close);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+  };
+  document.addEventListener('keydown', onKey);
+
+  // Debug utile (à laisser le temps de valider)
+  console.log('[ECOS] openEcosPreview:', {
+    name: file?.name,
+    originalUrl: file?.url,
+    normalizedUrl: safeUrl
+  });
+}
+
+  async function buildEcosCard(sddN, sddName, follow) {
+    const ecosCollapsed = isCollapsedKey(`sdd_${sddN}_ecos`);
+
+    const ecosCard = document.createElement('div');
+    ecosCard.className = `sc${ecosCollapsed ? ' collapsed' : ''}`;
+    ecosCard.dataset.key = 'ecos';
+    ecosCard.innerHTML = `
+      <div class="sc-head">
+        <div class="sc-dot" style="background:#dc2626"></div>
+        <span class="sc-head-label">Stations ECOS</span>
+        <span class="sc-toggle">▾</span>
+      </div>
+      <div class="sc-body" id="ecos-body">
+        ${ecosCollapsed ? '' : '<div style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px"><div style="width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite"></div>Chargement…</div>'}
+      </div>`;
+
+    follow.appendChild(ecosCard);
+
+    const body = ecosCard.querySelector('#ecos-body');
+
+    function renderEcosFiles(files) {
+      if (!files.length) {
+        body.innerHTML = '<p style="color:var(--muted);font-size:12px;font-style:italic;margin:0">Aucune station ECOS disponible pour cette SDD.</p>';
+        return;
+      }
+
+      let html = '<div class="ecos-list">';
+      for (const f of files) {
+        const sizeMB = f.sizeBytes > 0 ? `${(f.sizeBytes / 1048576).toFixed(1)} Mo` : '';
+        const meta   = [f.source, f.specialite, sizeMB].filter(Boolean).join(' · ');
+        html += `
+          <div class="ecos-item">
+            <div class="ecos-icon">📄</div>
+            <div class="ecos-info">
+              <div class="ecos-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+              ${meta ? `<div class="ecos-meta">${escapeHtml(meta)}</div>` : ''}
+            </div>
+            <div class="ecos-actions">
+              <button class="ecos-btn" data-preview="${escapeHtml(JSON.stringify(f))}">Voir</button>
+              <a class="ecos-btn primary" href="${escapeHtml(f.url)}" download="${escapeHtml(f.name)}" target="_blank">⬇</a>
+            </div>
+          </div>`;
+      }
+      html += '</div>';
+      body.innerHTML = html;
+
+      // Preview click
+      body.addEventListener('click', e => {
+        const btn = e.target.closest('[data-preview]');
+        if (!btn) return;
+        try { openEcosPreview(JSON.parse(btn.dataset.preview)); } catch (_) {}
+      });
+    }
+
+    // Chargement si non collapsed
+    let loaded = false;
+    async function loadIfNeeded() {
+      if (loaded) return;
+      loaded = true;
+      try {
+        const files = await loadEcosFiles(sddN);
+        renderEcosFiles(files);
+      } catch (e) {
+        body.innerHTML = `<p style="color:var(--danger);font-size:12px;margin:0">⚠ ${escapeHtml(e.message)}</p>`;
+      }
+    }
+
+    if (!ecosCollapsed) loadIfNeeded();
+
+    ecosCard.querySelector('.sc-head').addEventListener('click', e => {
+      if (e.target.closest('button,a')) return;
+      const collapsed = ecosCard.classList.toggle('collapsed');
+      setCollapsedKey(`sdd_${sddN}_ecos`, collapsed);
+      if (!collapsed) loadIfNeeded();
+    });
   }
 
   function buildSDD() {
@@ -2095,7 +2489,7 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
         ${navPos ? `<span id="sdd-nav-pos">${navPos}</span>` : ''}
         <a class="sdd-nav-btn${nextHref ? '' : ' disabled'}" ${nextHref ? `href="${escapeHtml(nextHref)}"` : ''} title="${nextNum ? `SDD-${pad3(nextNum)}` : ''}">Suiv. ›</a>
       ` : ''}
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(bc);
 
     // Raccourcis clavier prev/next
@@ -2237,33 +2631,59 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       const doneDate       = getDoneDate(sddN);
       const doneDateStr    = doneDate ? formatDoneDate(doneDate) : '';
 
-      const notesHTML = [
-        // ── 3-state status picker ──
-        '<div class="status-picker" id="status-picker">',
-        '  <button class="status-btn" data-st="todo" title="À faire">À faire</button>',
-        '  <button class="status-btn" data-st="inprogress" title="En cours">🔄 En cours</button>',
-        '  <button class="status-btn" data-st="done" title="Faite">✓ Faite</button>',
-        '</div>',
-        '<textarea id="md-area" spellcheck="false" style="' +
-          'width:100%;min-height:220px;max-height:60vh;resize:vertical;' +
-          'padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);' +
-          'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;' +
-          'font-size:var(--fs-notes);line-height:1.6;color:var(--text);outline:none;' +
-          'background:#fafcff;transition:border-color var(--transition),box-shadow var(--transition)' +
-        '" placeholder="Notes Markdown..."></textarea>',
-        '<div id="md-prev" style="display:none;margin-top:10px;padding:14px;' +
-          'border:1px solid var(--border);border-radius:var(--r-sm);background:#fafcff;min-height:60px"></div>',
-        '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">',
-        '  <button id="md-toggle" class="md-btn">Aperçu</button>',
-        '  <span id="md-status" style="margin-left:auto;font-size:var(--fs-tiny);color:var(--muted)"></span>',
-        '</div>',
-      ].join('\n');
+      // ── WYSIWYG : convertit Markdown stocké ↔ HTML éditable ──
+      // Stratégie : on stocke toujours le Markdown brut, on affiche le HTML rendu.
+      // À la sauvegarde, on reconvertit le innerHTML en Markdown minimal.
+
+      function htmlToMd(el) {
+        // Parcours DOM → Markdown lisible, suffisant pour un re-render fidèle
+        function nodeToMd(node) {
+          if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+          const tag = node.tagName?.toLowerCase();
+          const inner = [...node.childNodes].map(nodeToMd).join('');
+          if (tag === 'strong' || tag === 'b') return `**${inner}**`;
+          if (tag === 'em'     || tag === 'i') return `*${inner}*`;
+          if (tag === 'code')                  return `\`${inner}\``;
+          if (tag === 'a')  return `[${inner}](${node.href || ''})`;
+          if (tag === 'h1') return `# ${inner}`;
+          if (tag === 'h2') return `## ${inner}`;
+          if (tag === 'h3') return `### ${inner}`;
+          if (tag === 'li') return `- ${inner}`;
+          if (tag === 'ul' || tag === 'ol') return [...node.children].map(li => '- ' + [...li.childNodes].map(nodeToMd).join('')).join('\n');
+          if (tag === 'br') return '\n';
+          if (tag === 'p' || tag === 'div') return inner + '\n';
+          if (tag === 'blockquote') return inner.split('\n').map(l => '> ' + l).join('\n');
+          if (tag === 'hr') return '---';
+          return inner;
+        }
+        return [...el.childNodes].map(nodeToMd).join('').replace(/\n{3,}/g, '\n\n').trim();
+      }
+
+      const notesHTML =
+        '<div class="status-picker" id="status-picker">' +
+        '  <button class="status-btn" data-st="todo" title="À faire">À faire</button>' +
+        '  <button class="status-btn" data-st="inprogress" title="En cours">🔄 En cours</button>' +
+        '  <button class="status-btn" data-st="done" title="Faite">✓ Faite</button>' +
+        '</div>' +
+        '<div class="wy-wrap" style="margin-top:8px">' +
+        '  <div class="wy-toolbar">' +
+        '    <button class="wy-tb-btn" data-cmd="bold"   title="Gras (Ctrl+B)"><strong>B</strong></button>' +
+        '    <button class="wy-tb-btn" data-cmd="italic" title="Italique (Ctrl+I)"><em>I</em></button>' +
+        '    <div class="wy-tb-sep"></div>' +
+        '    <button class="wy-tb-btn" data-cmd="h2"     title="Titre">H</button>' +
+        '    <button class="wy-tb-btn" data-cmd="ul"     title="Liste à puces">•</button>' +
+        '    <div class="wy-tb-sep"></div>' +
+        '    <button class="wy-tb-btn" data-cmd="clear"  title="Supprimer la mise en page" style="opacity:.45;font-size:10px">Aa</button>' +
+        '  </div>' +
+        '  <div id="wy-editor" contenteditable="true" spellcheck="true" data-placeholder="Notes…"></div>' +
+        '  <div id="wy-save-status"></div>' +
+        '</div>';
 
       // Card titre initial avec date si déjà faite
       const noteCardTitle = 'Suivi & notes';
       const noteCard = card(noteCardTitle, '#4f46e5', notesHTML, 'notes');
 
-      // Inject date badge into head if done
+      // Date badge
       const headLabel = noteCard.querySelector('.sc-head-label');
       const dateBadge = document.createElement('span');
       dateBadge.className = 'sc-head-date';
@@ -2276,100 +2696,215 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
       }
       headLabel.after(dateBadge);
 
-      const togEl   = noteCard.querySelector('#md-toggle');
-      const statEl  = noteCard.querySelector('#md-status');
-      const areaEl  = noteCard.querySelector('#md-area');
-      const prevEl  = noteCard.querySelector('#md-prev');
-      const picker  = noteCard.querySelector('#status-picker');
+      const wyEditor   = noteCard.querySelector('#wy-editor');
+      const saveStatus = noteCard.querySelector('#wy-save-status');
+      const picker     = noteCard.querySelector('#status-picker');
 
-      areaEl.value = getNotes(sddN);
+      // Charger les notes : Markdown → HTML rendu
+      wyEditor.innerHTML = mdToHtml(getNotes(sddN));
 
-      // Init status buttons
+      // ── Helpers DOM directs (sans execCommand) ──────────────────────────
+      function getSel() { return window.getSelection(); }
+
+      function getAnchorBlock() {
+        // Remonte depuis le nœud de sélection pour trouver l'enfant direct de wyEditor
+        const sel = getSel();
+        if (!sel || !sel.rangeCount) return null;
+        let node = sel.getRangeAt(0).startContainer;
+        while (node && node.parentNode !== wyEditor) node = node.parentNode;
+        return (node && node !== wyEditor) ? node : null;
+      }
+
+      function wrapInline(tagName) {
+        // Gras / italique : on wrape la sélection dans <strong> ou <em>
+        // Si déjà wrapé, on enlève le wrap (toggle)
+        const sel = getSel();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+        const range = sel.getRangeAt(0);
+
+        // Détecte si un ancêtre du type existe déjà
+        let ancestor = sel.anchorNode;
+        while (ancestor && ancestor !== wyEditor) {
+          if (ancestor.tagName?.toLowerCase() === tagName) {
+            // Dé-wrapper : remplacer le nœud par son contenu
+            const parent = ancestor.parentNode;
+            while (ancestor.firstChild) parent.insertBefore(ancestor.firstChild, ancestor);
+            parent.removeChild(ancestor);
+            return;
+          }
+          ancestor = ancestor.parentNode;
+        }
+
+        // Wrapper la sélection
+        const el = document.createElement(tagName);
+        try {
+          range.surroundContents(el);
+        } catch (_) {
+          // surroundContents échoue si la sélection traverse plusieurs éléments
+          // → on extrait et on ré-insère
+          el.appendChild(range.extractContents());
+          range.insertNode(el);
+        }
+        sel.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNodeContents(el);
+        sel.addRange(newRange);
+      }
+
+      function toggleBlock(tagName) {
+        // Transforme le bloc courant en tagName, ou en <p> si déjà ce type
+        const block = getAnchorBlock();
+        if (!block) return;
+        const current = block.tagName?.toLowerCase();
+        const target  = current === tagName ? 'p' : tagName;
+        const newEl   = document.createElement(target);
+        newEl.innerHTML = block.innerHTML;
+        wyEditor.replaceChild(newEl, block);
+        // Replace cursor
+        const r = document.createRange();
+        r.selectNodeContents(newEl);
+        r.collapse(false);
+        const s = getSel();
+        s.removeAllRanges();
+        s.addRange(r);
+      }
+
+      function toggleList() {
+        // Passe le bloc courant en <li> dans un <ul>, ou annule
+        const block = getAnchorBlock();
+        if (!block) return;
+        if (block.tagName?.toLowerCase() === 'ul') {
+          // Annule : remplace ul par ses li comme p
+          const frag = document.createDocumentFragment();
+          block.querySelectorAll('li').forEach(li => {
+            const p = document.createElement('p');
+            p.innerHTML = li.innerHTML;
+            frag.appendChild(p);
+          });
+          wyEditor.replaceChild(frag, block);
+          return;
+        }
+        if (block.tagName?.toLowerCase() === 'li') return; // déjà dans une liste
+        const ul = document.createElement('ul');
+        const li = document.createElement('li');
+        li.innerHTML = block.innerHTML;
+        ul.appendChild(li);
+        wyEditor.replaceChild(ul, block);
+        const r = document.createRange();
+        r.selectNodeContents(li);
+        r.collapse(false);
+        const s = getSel();
+        s.removeAllRanges();
+        s.addRange(r);
+      }
+
+      function clearFormatting() {
+        // Extrait le texte pur, reconstruit des <p> simples
+        // Sans confirm(), sans rechargement
+        const text = wyEditor.innerText || wyEditor.textContent || '';
+        const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+        const frag  = document.createDocumentFragment();
+        if (!lines.length) {
+          frag.appendChild(document.createElement('p'));
+        } else {
+          lines.forEach(line => {
+            const p = document.createElement('p');
+            p.textContent = line;
+            frag.appendChild(p);
+          });
+        }
+        wyEditor.innerHTML = '';
+        wyEditor.appendChild(frag);
+        // Curseur à la fin
+        const r = document.createRange();
+        r.selectNodeContents(wyEditor);
+        r.collapse(false);
+        const s = getSel();
+        if (s) { s.removeAllRanges(); s.addRange(r); }
+        // Déclenche la sauvegarde
+        saveNow();
+      }
+
+      // ── Statut buttons ──────────────────────────────────────────────────
       function applyStatus(st) {
         picker.querySelectorAll('.status-btn').forEach(btn => {
           btn.classList.remove('active-todo', 'active-inprogress', 'active-done');
           if (btn.dataset.st === st) btn.classList.add(`active-${st}`);
         });
-        // Update date badge
-        const dd     = getDoneDate(sddN);
-        const ddStr  = dd ? formatDoneDate(dd) : '';
-        const badge  = noteCard.querySelector('#notes-date-badge');
-        if (st === 'done' && ddStr) {
-          badge.textContent = ddStr;
-          badge.style.display = '';
-        } else {
-          badge.style.display = 'none';
-        }
+        const dd    = getDoneDate(sddN);
+        const ddStr = dd ? formatDoneDate(dd) : '';
+        const badge = noteCard.querySelector('#notes-date-badge');
+        if (st === 'done' && ddStr) { badge.textContent = ddStr; badge.style.display = ''; }
+        else badge.style.display = 'none';
       }
-
       applyStatus(currentStatus);
 
       picker.querySelectorAll('.status-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const st = btn.dataset.st;
-          setStatus(sddN, st);
-          applyStatus(st);
+          setStatus(sddN, btn.dataset.st);
+          applyStatus(btn.dataset.st);
         });
       });
 
-      const setStatus2 = (txt) => { statEl.textContent = txt; };
+      // ── Sauvegarde ──────────────────────────────────────────────────────
+      let _saveTimer = null;
+      function saveNow() {
+        const md = htmlToMd(wyEditor);
+        setNotes(sddN, md);
+        publicNoteMirrorPush(sddN, md).catch(() => {});
+        saveStatus.textContent = 'Sauvé ✓';
+        clearTimeout(saveNow._flash);
+        saveNow._flash = setTimeout(() => { saveStatus.textContent = ''; }, 1800);
+      }
 
-      const saveNow = () => {
-        setNotes(sddN, areaEl.value);
-        publicNoteMirrorPush(sddN, areaEl.value).catch(() => {});
-        setStatus2('Sauvé ✓');
-        clearTimeout(saveNow._t);
-        saveNow._t = setTimeout(() => setStatus2(''), 1400);
-      };
-
-      areaEl.addEventListener('focus', () => {
-        areaEl.style.borderColor = 'var(--ac)';
-        areaEl.style.boxShadow   = 'var(--sh-focus)';
-      });
-      areaEl.addEventListener('blur', () => {
-        areaEl.style.borderColor = 'var(--border)';
-        areaEl.style.boxShadow   = 'none';
+      wyEditor.addEventListener('input', () => {
+        saveStatus.textContent = '…';
+        clearTimeout(_saveTimer);
+        _saveTimer = setTimeout(saveNow, CFG.autosaveDelay);
       });
 
-      let autoTimer = null;
-      areaEl.addEventListener('input', () => {
-        setStatus2('…');
-        clearTimeout(autoTimer);
-        autoTimer = setTimeout(() => {
-          saveNow();
-          publicNoteMirrorPush(sddN, areaEl.value).catch(() => {});
-        }, CFG.autosaveDelay);
-        if (prevEl.style.display !== 'none') prevEl.innerHTML = mdToHtml(areaEl.value);
+      // ── Toolbar : mousedown (pas click) pour ne pas perdre la sélection ─
+      noteCard.querySelector('.wy-toolbar').addEventListener('mousedown', (e) => {
+        const btn = e.target.closest('.wy-tb-btn');
+        if (!btn) return;
+        e.preventDefault(); // empêche le blur sur wyEditor → sélection conservée
+        const cmd = btn.dataset.cmd;
+        if (cmd === 'bold')   { wrapInline('strong'); }
+        if (cmd === 'italic') { wrapInline('em'); }
+        if (cmd === 'h2')     { toggleBlock('h2'); }
+        if (cmd === 'ul')     { toggleList(); }
+        if (cmd === 'clear')  { clearFormatting(); }
+        wyEditor.dispatchEvent(new Event('input', { bubbles: true }));
       });
 
-      togEl.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const show = prevEl.style.display === 'none';
-        prevEl.style.display  = show ? 'block' : 'none';
-        areaEl.style.display  = show ? 'none'  : 'block';
-        togEl.textContent     = show ? 'Éditer' : 'Aperçu';
-        if (show) prevEl.innerHTML = mdToHtml(areaEl.value);
-      });
-
-      areaEl.addEventListener('keydown', (e) => {
+      // ── Clavier ─────────────────────────────────────────────────────────
+      wyEditor.addEventListener('keydown', (e) => {
         const mod = e.ctrlKey || e.metaKey;
         if (mod && /^[sS]$/.test(e.key)) { e.preventDefault(); saveNow(); return; }
-        if (mod && /^[bB]$/.test(e.key)) { e.preventDefault(); wrapSelection(areaEl, '**', '**'); return; }
-        if (mod && /^[iI]$/.test(e.key)) { e.preventDefault(); wrapSelection(areaEl, '*', '*'); return; }
-        if (mod && /^[uU]$/.test(e.key)) { e.preventDefault(); wrapSelection(areaEl, '__', '__'); return; }
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          e.shiftKey ? outdentSelection(areaEl, CFG.indentSpaces) : indentSelection(areaEl, CFG.indentSpaces);
+        if (mod && /^[bB]$/.test(e.key)) { e.preventDefault(); wrapInline('strong'); return; }
+        if (mod && /^[iI]$/.test(e.key)) { e.preventDefault(); wrapInline('em'); return; }
+        // Enter après un titre → nouveau <p>
+        if (e.key === 'Enter') {
+          const block = getAnchorBlock();
+          if (block && /^H[1-3]$/.test(block.tagName || '')) {
+            e.preventDefault();
+            const p = document.createElement('p');
+            p.innerHTML = '<br>';
+            block.after(p);
+            const r = document.createRange();
+            r.setStart(p, 0);
+            r.collapse(true);
+            const s = getSel();
+            s.removeAllRanges();
+            s.addRange(r);
+          }
         }
       });
 
       window.addEventListener('keydown', (e) => {
         if (!(e.ctrlKey || e.metaKey) || !/^[sS]$/.test(e.key)) return;
-        if (noteCard.contains(document.activeElement) || prevEl.style.display !== 'none') {
-          e.preventDefault();
-          saveNow();
-        }
+        if (noteCard.contains(document.activeElement)) { e.preventDefault(); saveNow(); }
       }, { capture: true });
 
       follow.appendChild(noteCard);
@@ -2418,6 +2953,11 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
           communityNotesLoad(sddN, sddName, commBody);
         }
       });
+    }
+
+    // ── Card ECOS ──
+    if (sddN != null && cloudEnabled()) {
+      buildEcosCard(sddN, sddName, follow);
     }
 
     body.appendChild(follow);
