@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         UNESS – Fonctionnalité complète
+// @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      10.0
+// @version      10.1
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -2489,7 +2489,7 @@ function openEcosPreview(file) {
         ${navPos ? `<span id="sdd-nav-pos">${navPos}</span>` : ''}
         <a class="sdd-nav-btn${nextHref ? '' : ' disabled'}" ${nextHref ? `href="${escapeHtml(nextHref)}"` : ''} title="${nextNum ? `SDD-${pad3(nextNum)}` : ''}">Suiv. ›</a>
       ` : ''}
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
     document.body.appendChild(bc);
 
     // Raccourcis clavier prev/next
@@ -2662,7 +2662,7 @@ function openEcosPreview(file) {
       const notesHTML =
         '<div class="status-picker" id="status-picker">' +
         '  <button class="status-btn" data-st="todo" title="À faire">À faire</button>' +
-        '  <button class="status-btn" data-st="inprogress" title="En cours">🔄 En cours</button>' +
+        '  <button class="status-btn" data-st="inprogress" title="En cours">En cours</button>' +
         '  <button class="status-btn" data-st="done" title="Faite">✓ Faite</button>' +
         '</div>' +
         '<div class="wy-wrap" style="margin-top:8px">' +
