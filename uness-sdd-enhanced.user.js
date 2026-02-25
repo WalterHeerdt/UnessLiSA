@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      10.1
+// @version      10.2
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -353,21 +353,23 @@ function gsToPublicHttp(gsUrl) {
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--ac);text-decoration:none;font-weight:var(--fw-semi)">$1</a>'
     );
-    s = s.replace(/^######\s(.+)$/gm, '<h6 style="margin:.65rem 0 .3rem;font-size:var(--fs-small)">$1</h6>');
-    s = s.replace(/^#####\s(.+)$/gm,  '<h5 style="margin:.75rem 0 .35rem;font-size:var(--fs-h4)">$1</h5>');
-    s = s.replace(/^####\s(.+)$/gm,   '<h4 style="margin:.85rem 0 .4rem;font-size:var(--fs-h3)">$1</h4>');
-    s = s.replace(/^###\s(.+)$/gm,    '<h3 style="margin:.95rem 0 .45rem;font-size:var(--fs-h2)">$1</h3>');
-    s = s.replace(/^##\s(.+)$/gm,     '<h2 style="margin:1.05rem 0 .5rem;font-size:var(--fs-h1)">$1</h2>');
-    s = s.replace(/^#\s(.+)$/gm,      '<h1 style="margin:1.15rem 0 .55rem;font-size:var(--fs-title);font-weight:var(--fw-heavy)">$1</h1>');
+    s = s.replace(/^######\s(.+)$/gm, '<h6 style="margin:.1em 0;font-size:11px;font-weight:600">$1</h6>');
+    s = s.replace(/^#####\s(.+)$/gm,  '<h5 style="margin:.1em 0;font-size:11px;font-weight:700">$1</h5>');
+    s = s.replace(/^####\s(.+)$/gm,   '<h4 style="margin:.1em 0;font-size:12px;font-weight:700">$1</h4>');
+    s = s.replace(/^###\s(.+)$/gm,    '<h3 style="margin:.1em 0;font-size:12px;font-weight:700;color:var(--ac)">$1</h3>');
+    s = s.replace(/^##\s(.+)$/gm,     '<h2 style="margin:.1em 0;font-size:13px;font-weight:700">$1</h2>');
+    s = s.replace(/^#\s(.+)$/gm,      '<h1 style="margin:.15em 0;font-size:14px;font-weight:800">$1</h1>');
     s = s.replace(/^(?:- |\* )(.*)$/gm, '<li>$1</li>');
     s = s.replace(/(<li>.*<\/li>\n?)+/g, m =>
-      `<ul style="margin:.45rem 0 .9rem 1.25rem;list-style:disc;color:var(--text2);line-height:1.65;font-size:var(--fs-base)">${m}</ul>`
+      `<ul style="margin:.1em 0;padding-left:1.1em;list-style:disc;color:var(--text2);font-size:12px">${m.replace(/<\/li>\n<li>/g,'</li><li>')}</ul>`
     );
-    s = s.split(/\n{2,}/).map(block => {
+    // Retours à la ligne simples → <br>, doubles → nouveau paragraphe
+    s = s.replace(/\n(?!\n)/g, '<br>');
+    s = s.split(/\n+/).map(block => {
       const t = block.trim();
       if (!t) return '';
       if (t.startsWith('<h') || t.startsWith('<ul')) return block;
-      return `<p style="margin:.55rem 0;color:var(--text2);line-height:1.7;font-size:var(--fs-base)">${block.replace(/\n/g, '<br>')}</p>`;
+      return `<p style="margin:.25em 0;color:var(--text2);line-height:1.6;font-size:12px">${block}</p>`;
     }).join('');
     return s || '<p style="color:var(--muted);margin:0;font-style:italic">Aucune note.</p>';
   }
@@ -1994,70 +1996,79 @@ function gsToPublicHttp(gsUrl) {
       .att-ai-panel th,.att-ai-panel td{padding:5px 8px;border:1px solid var(--border);text-align:left}
       .att-ai-panel th{background:var(--surface2);font-weight:var(--fw-semi)}
 
-      /* ── Éditeur WYSIWYG notes ── */
-      .wy-wrap{
-        border:1px solid var(--border);border-radius:var(--r-sm);
-        background:#fafcff;min-height:120px;
-        transition:border-color var(--transition);
-        position:relative;
-      }
-      .wy-wrap:focus-within{border-color:var(--ac);box-shadow:var(--sh-focus)}
-
-      /* Barre d'outils micro */
-      .wy-toolbar{
-        display:flex;gap:2px;padding:4px 6px;
+      /* ── Éditeur Markdown notes ── */
+      .md-toolbar{
+        display:none;gap:2px;padding:4px 6px;
         border-bottom:1px solid var(--border);
         background:#f8fafc;border-radius:var(--r-sm) var(--r-sm) 0 0;
+        align-items:center;
       }
-      .wy-tb-btn{
+      .md-editor-wrap.editing .md-toolbar{display:flex}
+      .md-tb-btn{
         padding:2px 7px;border:none;background:transparent;
         border-radius:4px;cursor:pointer;font-family:inherit;
-        font-size:12px;color:var(--muted);line-height:1.6;
+        font-size:11px;color:var(--muted);line-height:1.6;
         transition:background var(--transition),color var(--transition);
       }
-      .wy-tb-btn:hover{background:var(--border);color:var(--text)}
-      .wy-tb-sep{width:1px;background:var(--border);margin:3px 2px;flex-shrink:0}
-
-      /* Zone éditable */
-      #wy-editor{
-        padding:10px 12px;outline:none;
-        min-height:100px;max-height:55vh;overflow-y:auto;
-        font-size:12px;line-height:1.5;color:var(--text2);
-        white-space:pre-wrap;word-break:break-word;
+      .md-tb-btn:hover{background:var(--border);color:var(--text)}
+      .md-tb-sep{width:1px;background:var(--border2);margin:2px 3px;align-self:stretch}
+      .md-editor-wrap{
+        border:1px solid var(--border);border-radius:var(--r-sm);
+        background:#fafcff;
+        transition:border-color var(--transition);
+        cursor:text;
       }
-      /* Rendu Markdown dans le WYSIWYG */
-      #wy-editor p{margin:.25em 0;line-height:1.5}
-      #wy-editor h1{font-size:15px;font-weight:700;margin:.6em 0 .2em;color:var(--text)}
-      #wy-editor h2{font-size:14px;font-weight:700;margin:.5em 0 .2em;color:var(--text)}
-      #wy-editor h3{font-size:13px;font-weight:600;margin:.4em 0 .15em;color:var(--text)}
-      #wy-editor ul,#wy-editor ol{margin:.2em 0 .4em 1.2em;padding:0;line-height:1.5}
-      #wy-editor li{margin-bottom:2px;font-size:12px}
-      #wy-editor strong{font-weight:700;color:var(--text)}
-      #wy-editor em{font-style:italic}
-      #wy-editor code{
+      .md-editor-wrap:hover{border-color:var(--border2)}
+      .md-editor-wrap.editing{border-color:var(--ac);box-shadow:var(--sh-focus);cursor:auto}
+
+      /* Vue rendue */
+      .md-preview{
+        padding:10px 12px;min-height:50px;
+        font-size:12px;line-height:1.6;color:var(--text2);
+      }
+      .md-preview p{margin:.25em 0;line-height:1.65;font-size:12px}
+      .md-preview h1{font-size:14px;font-weight:800;margin:.3em 0 .1em;color:var(--text)}
+      .md-preview h2{font-size:13px;font-weight:700;margin:.25em 0 .1em;color:var(--text)}
+      .md-preview h3{font-size:12px;font-weight:700;margin:.2em 0 .05em;color:var(--ac)}
+      .md-preview h4,.md-preview h5,.md-preview h6{font-size:12px;font-weight:600;margin:.2em 0 .05em;color:var(--text)}
+      .md-preview ul,.md-preview ol{margin:.2em 0;padding:0 0 0 1.1em;font-size:12px}
+      .md-preview li{margin:0;padding:0;font-size:12px;line-height:1.55}
+      .md-preview strong{font-weight:700;color:var(--text)}
+      .md-preview em{font-style:italic}
+      .md-preview code{
         font-family:ui-monospace,monospace;font-size:11px;
         background:#f1f5f9;padding:1px 5px;border-radius:4px;
         border:1px solid var(--border);
       }
-      #wy-editor a{color:var(--ac);text-decoration:none}
-      #wy-editor a:hover{text-decoration:underline}
-      #wy-editor blockquote{
-        border-left:3px solid var(--border2);margin:.3em 0;
+      .md-preview a{color:var(--ac);text-decoration:none}
+      .md-preview a:hover{text-decoration:underline}
+      .md-preview blockquote{
+        border-left:3px solid var(--border2);margin:.2em 0;
         padding:.1em .6em;color:var(--muted);font-style:italic;font-size:12px;
       }
-      #wy-editor hr{border:none;border-top:1px solid var(--border);margin:.5em 0}
-
-      /* Placeholder */
-      #wy-editor:empty::before{
-        content:attr(data-placeholder);color:var(--muted);
-        font-style:italic;pointer-events:none;font-size:12px;
+      .md-preview hr{border:none;border-top:1px solid var(--border);margin:.3em 0}
+      .md-preview:empty::before{
+        content:'Notes… (cliquez pour éditer)';
+        color:var(--muted);font-style:italic;font-size:12px;pointer-events:none;
       }
+
+
+      /* Textarea Markdown brut */
+      .md-textarea{
+        display:none;width:100%;box-sizing:border-box;
+        padding:10px 12px;border:none;outline:none;
+        background:transparent;resize:vertical;
+        font-family:ui-monospace,monospace;font-size:12px;
+        line-height:1.6;color:var(--text2);
+        min-height:180px;max-height:55vh;
+      }
+      .md-editor-wrap.editing .md-preview{display:none}
+      .md-editor-wrap.editing .md-textarea{display:block}
+
       /* Statut sauvegarde */
       #wy-save-status{
-        font-size:10px;color:var(--muted);padding:3px 8px 4px;
-        text-align:right;border-top:1px solid var(--border);
-        background:#f8fafc;border-radius:0 0 var(--r-sm) var(--r-sm);
-        min-height:18px;
+        font-size:10px;color:var(--muted);padding:2px 8px 3px;
+        text-align:right;min-height:16px;
       }
 
       /* ── Sélecteur 3 états (page SDD) ── */
@@ -2631,55 +2642,27 @@ function openEcosPreview(file) {
       const doneDate       = getDoneDate(sddN);
       const doneDateStr    = doneDate ? formatDoneDate(doneDate) : '';
 
-      // ── WYSIWYG : convertit Markdown stocké ↔ HTML éditable ──
-      // Stratégie : on stocke toujours le Markdown brut, on affiche le HTML rendu.
-      // À la sauvegarde, on reconvertit le innerHTML en Markdown minimal.
-
-      function htmlToMd(el) {
-        // Parcours DOM → Markdown lisible, suffisant pour un re-render fidèle
-        function nodeToMd(node) {
-          if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-          const tag = node.tagName?.toLowerCase();
-          const inner = [...node.childNodes].map(nodeToMd).join('');
-          if (tag === 'strong' || tag === 'b') return `**${inner}**`;
-          if (tag === 'em'     || tag === 'i') return `*${inner}*`;
-          if (tag === 'code')                  return `\`${inner}\``;
-          if (tag === 'a')  return `[${inner}](${node.href || ''})`;
-          if (tag === 'h1') return `# ${inner}`;
-          if (tag === 'h2') return `## ${inner}`;
-          if (tag === 'h3') return `### ${inner}`;
-          if (tag === 'li') return `- ${inner}`;
-          if (tag === 'ul' || tag === 'ol') return [...node.children].map(li => '- ' + [...li.childNodes].map(nodeToMd).join('')).join('\n');
-          if (tag === 'br') return '\n';
-          if (tag === 'p' || tag === 'div') return inner + '\n';
-          if (tag === 'blockquote') return inner.split('\n').map(l => '> ' + l).join('\n');
-          if (tag === 'hr') return '---';
-          return inner;
-        }
-        return [...el.childNodes].map(nodeToMd).join('').replace(/\n{3,}/g, '\n\n').trim();
-      }
-
+      // ── Notes Markdown : preview rendu / textarea brut ──
       const notesHTML =
         '<div class="status-picker" id="status-picker">' +
         '  <button class="status-btn" data-st="todo" title="À faire">À faire</button>' +
         '  <button class="status-btn" data-st="inprogress" title="En cours">En cours</button>' +
         '  <button class="status-btn" data-st="done" title="Faite">✓ Faite</button>' +
         '</div>' +
-        '<div class="wy-wrap" style="margin-top:8px">' +
-        '  <div class="wy-toolbar">' +
-        '    <button class="wy-tb-btn" data-cmd="bold"   title="Gras (Ctrl+B)"><strong>B</strong></button>' +
-        '    <button class="wy-tb-btn" data-cmd="italic" title="Italique (Ctrl+I)"><em>I</em></button>' +
-        '    <div class="wy-tb-sep"></div>' +
-        '    <button class="wy-tb-btn" data-cmd="h2"     title="Titre">H</button>' +
-        '    <button class="wy-tb-btn" data-cmd="ul"     title="Liste à puces">•</button>' +
-        '    <div class="wy-tb-sep"></div>' +
-        '    <button class="wy-tb-btn" data-cmd="clear"  title="Supprimer la mise en page" style="opacity:.45;font-size:10px">Aa</button>' +
+        '<div class="md-editor-wrap" id="md-editor-wrap" style="margin-top:8px">' +
+        '  <div class="md-toolbar" id="md-toolbar">' +
+        '    <button class="md-tb-btn" data-md="**" title="Gras"><strong>G</strong></button>' +
+        '    <button class="md-tb-btn" data-md="*" title="Italique"><em>I</em></button>' +
+        '    <button class="md-tb-btn" data-md="`" title="Code">` `</button>' +
+        '    <span class="md-tb-sep"></span>' +
+        '    <button class="md-tb-btn" data-md="## " data-line title="Titre">H</button>' +
+        '    <button class="md-tb-btn" data-md="- " data-line title="Liste">•</button>' +
         '  </div>' +
-        '  <div id="wy-editor" contenteditable="true" spellcheck="true" data-placeholder="Notes…"></div>' +
+        '  <div class="md-preview" id="md-preview"></div>' +
+        '  <textarea class="md-textarea" id="md-textarea" placeholder="Notes en Markdown…" spellcheck="false"></textarea>' +
         '  <div id="wy-save-status"></div>' +
         '</div>';
 
-      // Card titre initial avec date si déjà faite
       const noteCardTitle = 'Suivi & notes';
       const noteCard = card(noteCardTitle, '#4f46e5', notesHTML, 'notes');
 
@@ -2696,140 +2679,56 @@ function openEcosPreview(file) {
       }
       headLabel.after(dateBadge);
 
-      const wyEditor   = noteCard.querySelector('#wy-editor');
+      const mdWrap     = noteCard.querySelector('#md-editor-wrap');
+      const mdPreview  = noteCard.querySelector('#md-preview');
+      const mdTextarea = noteCard.querySelector('#md-textarea');
       const saveStatus = noteCard.querySelector('#wy-save-status');
       const picker     = noteCard.querySelector('#status-picker');
 
-      // Charger les notes : Markdown → HTML rendu
-      wyEditor.innerHTML = mdToHtml(getNotes(sddN));
-
-      // ── Helpers DOM directs (sans execCommand) ──────────────────────────
-      function getSel() { return window.getSelection(); }
-
-      function getAnchorBlock() {
-        // Remonte depuis le nœud de sélection pour trouver l'enfant direct de wyEditor
-        const sel = getSel();
-        if (!sel || !sel.rangeCount) return null;
-        let node = sel.getRangeAt(0).startContainer;
-        while (node && node.parentNode !== wyEditor) node = node.parentNode;
-        return (node && node !== wyEditor) ? node : null;
+      // ── Preview : Markdown → HTML ──
+      function renderPreview(md) {
+        const html = mdToHtml(md || '');
+        // mdToHtml retourne un fallback si vide, donc toujours truthy
+        mdPreview.innerHTML = html;
       }
 
-      function wrapInline(tagName) {
-        // Gras / italique : on wrape la sélection dans <strong> ou <em>
-        // Si déjà wrapé, on enlève le wrap (toggle)
-        const sel = getSel();
-        if (!sel || !sel.rangeCount || sel.isCollapsed) return;
-        const range = sel.getRangeAt(0);
+      // Initialisation
+      const _initMd = getNotes(sddN);
+      mdTextarea.value = _initMd;
+      renderPreview(_initMd);
 
-        // Détecte si un ancêtre du type existe déjà
-        let ancestor = sel.anchorNode;
-        while (ancestor && ancestor !== wyEditor) {
-          if (ancestor.tagName?.toLowerCase() === tagName) {
-            // Dé-wrapper : remplacer le nœud par son contenu
-            const parent = ancestor.parentNode;
-            while (ancestor.firstChild) parent.insertBefore(ancestor.firstChild, ancestor);
-            parent.removeChild(ancestor);
-            return;
-          }
-          ancestor = ancestor.parentNode;
-        }
+      // ── Bascule édition / lecture ──
+      const mdToolbar = noteCard.querySelector('#md-toolbar');
 
-        // Wrapper la sélection
-        const el = document.createElement(tagName);
-        try {
-          range.surroundContents(el);
-        } catch (_) {
-          // surroundContents échoue si la sélection traverse plusieurs éléments
-          // → on extrait et on ré-insère
-          el.appendChild(range.extractContents());
-          range.insertNode(el);
-        }
-        sel.removeAllRanges();
-        const newRange = document.createRange();
-        newRange.selectNodeContents(el);
-        sel.addRange(newRange);
+      function enterEdit() {
+        if (mdWrap.classList.contains('editing')) return;
+        mdWrap.classList.add('editing');
+        mdTextarea.focus();
+        const len = mdTextarea.value.length;
+        mdTextarea.setSelectionRange(len, len);
       }
 
-      function toggleBlock(tagName) {
-        // Transforme le bloc courant en tagName, ou en <p> si déjà ce type
-        const block = getAnchorBlock();
-        if (!block) return;
-        const current = block.tagName?.toLowerCase();
-        const target  = current === tagName ? 'p' : tagName;
-        const newEl   = document.createElement(target);
-        newEl.innerHTML = block.innerHTML;
-        wyEditor.replaceChild(newEl, block);
-        // Replace cursor
-        const r = document.createRange();
-        r.selectNodeContents(newEl);
-        r.collapse(false);
-        const s = getSel();
-        s.removeAllRanges();
-        s.addRange(r);
-      }
-
-      function toggleList() {
-        // Passe le bloc courant en <li> dans un <ul>, ou annule
-        const block = getAnchorBlock();
-        if (!block) return;
-        if (block.tagName?.toLowerCase() === 'ul') {
-          // Annule : remplace ul par ses li comme p
-          const frag = document.createDocumentFragment();
-          block.querySelectorAll('li').forEach(li => {
-            const p = document.createElement('p');
-            p.innerHTML = li.innerHTML;
-            frag.appendChild(p);
-          });
-          wyEditor.replaceChild(frag, block);
-          return;
-        }
-        if (block.tagName?.toLowerCase() === 'li') return; // déjà dans une liste
-        const ul = document.createElement('ul');
-        const li = document.createElement('li');
-        li.innerHTML = block.innerHTML;
-        ul.appendChild(li);
-        wyEditor.replaceChild(ul, block);
-        const r = document.createRange();
-        r.selectNodeContents(li);
-        r.collapse(false);
-        const s = getSel();
-        s.removeAllRanges();
-        s.addRange(r);
-      }
-
-      function clearFormatting() {
-        // Extrait le texte pur, reconstruit des <p> simples
-        // Sans confirm(), sans rechargement
-        const text = wyEditor.innerText || wyEditor.textContent || '';
-        const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
-        const frag  = document.createDocumentFragment();
-        if (!lines.length) {
-          frag.appendChild(document.createElement('p'));
-        } else {
-          lines.forEach(line => {
-            const p = document.createElement('p');
-            p.textContent = line;
-            frag.appendChild(p);
-          });
-        }
-        wyEditor.innerHTML = '';
-        wyEditor.appendChild(frag);
-        // Curseur à la fin
-        const r = document.createRange();
-        r.selectNodeContents(wyEditor);
-        r.collapse(false);
-        const s = getSel();
-        if (s) { s.removeAllRanges(); s.addRange(r); }
-        // Déclenche la sauvegarde
+      function exitEdit() {
+        if (!mdWrap.classList.contains('editing')) return;
+        mdWrap.classList.remove('editing');
         saveNow();
+        renderPreview(mdTextarea.value);
       }
 
-      // ── Statut buttons ──────────────────────────────────────────────────
+      mdPreview.addEventListener('click', enterEdit);
+      mdWrap.addEventListener('click', (e) => {
+        if (!mdWrap.classList.contains('editing')) enterEdit();
+      });
+
+      mdTextarea.addEventListener('blur', () => {
+        setTimeout(exitEdit, 150);
+      });
+
+      // ── Statut ──
       function applyStatus(st) {
         picker.querySelectorAll('.status-btn').forEach(btn => {
           btn.classList.remove('active-todo', 'active-inprogress', 'active-done');
-          if (btn.dataset.st === st) btn.classList.add(`active-${st}`);
+          if (btn.dataset.st === st) btn.classList.add('active-' + st);
         });
         const dd    = getDoneDate(sddN);
         const ddStr = dd ? formatDoneDate(dd) : '';
@@ -2847,10 +2746,10 @@ function openEcosPreview(file) {
         });
       });
 
-      // ── Sauvegarde ──────────────────────────────────────────────────────
+      // ── Sauvegarde ──
       let _saveTimer = null;
       function saveNow() {
-        const md = htmlToMd(wyEditor);
+        const md = mdTextarea.value;
         setNotes(sddN, md);
         publicNoteMirrorPush(sddN, md).catch(() => {});
         saveStatus.textContent = 'Sauvé ✓';
@@ -2858,54 +2757,72 @@ function openEcosPreview(file) {
         saveNow._flash = setTimeout(() => { saveStatus.textContent = ''; }, 1800);
       }
 
-      wyEditor.addEventListener('input', () => {
+      mdTextarea.addEventListener('input', () => {
         saveStatus.textContent = '…';
         clearTimeout(_saveTimer);
         _saveTimer = setTimeout(saveNow, CFG.autosaveDelay);
       });
 
-      // ── Toolbar : mousedown (pas click) pour ne pas perdre la sélection ─
-      noteCard.querySelector('.wy-toolbar').addEventListener('mousedown', (e) => {
-        const btn = e.target.closest('.wy-tb-btn');
-        if (!btn) return;
-        e.preventDefault(); // empêche le blur sur wyEditor → sélection conservée
-        const cmd = btn.dataset.cmd;
-        if (cmd === 'bold')   { wrapInline('strong'); }
-        if (cmd === 'italic') { wrapInline('em'); }
-        if (cmd === 'h2')     { toggleBlock('h2'); }
-        if (cmd === 'ul')     { toggleList(); }
-        if (cmd === 'clear')  { clearFormatting(); }
-        wyEditor.dispatchEvent(new Event('input', { bubbles: true }));
-      });
+      // ── Helper : wrap/toggle marqueur Markdown autour de la sélection ──
+      function mdInline(marker) {
+        const ta  = mdTextarea;
+        const s   = ta.selectionStart, e2 = ta.selectionEnd;
+        const val = ta.value;
+        const sel = val.slice(s, e2);
+        const len = marker.length;
+        // Déjà wrapé → on retire
+        if (val.slice(s - len, s) === marker && val.slice(e2, e2 + len) === marker) {
+          ta.value = val.slice(0, s - len) + sel + val.slice(e2 + len);
+          ta.selectionStart = s - len;
+          ta.selectionEnd   = e2 - len;
+        } else {
+          ta.value = val.slice(0, s) + marker + sel + marker + val.slice(e2);
+          ta.selectionStart = s + len;
+          ta.selectionEnd   = e2 + len;
+        }
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
 
-      // ── Clavier ─────────────────────────────────────────────────────────
-      wyEditor.addEventListener('keydown', (e) => {
+      // ── Helper : wrap/toggle préfixe de ligne ──
+      function mdPrefix(prefix) {
+        const ta  = mdTextarea;
+        const s   = ta.selectionStart;
+        const val = ta.value;
+        const lineStart = val.lastIndexOf('\n', s - 1) + 1;
+        if (val.slice(lineStart, lineStart + prefix.length) === prefix) {
+          ta.value = val.slice(0, lineStart) + val.slice(lineStart + prefix.length);
+          ta.selectionStart = ta.selectionEnd = Math.max(s - prefix.length, lineStart);
+        } else {
+          ta.value = val.slice(0, lineStart) + prefix + val.slice(lineStart);
+          ta.selectionStart = ta.selectionEnd = s + prefix.length;
+        }
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      mdTextarea.addEventListener('keydown', (e) => {
         const mod = e.ctrlKey || e.metaKey;
         if (mod && /^[sS]$/.test(e.key)) { e.preventDefault(); saveNow(); return; }
-        if (mod && /^[bB]$/.test(e.key)) { e.preventDefault(); wrapInline('strong'); return; }
-        if (mod && /^[iI]$/.test(e.key)) { e.preventDefault(); wrapInline('em'); return; }
-        // Enter après un titre → nouveau <p>
-        if (e.key === 'Enter') {
-          const block = getAnchorBlock();
-          if (block && /^H[1-3]$/.test(block.tagName || '')) {
-            e.preventDefault();
-            const p = document.createElement('p');
-            p.innerHTML = '<br>';
-            block.after(p);
-            const r = document.createRange();
-            r.setStart(p, 0);
-            r.collapse(true);
-            const s = getSel();
-            s.removeAllRanges();
-            s.addRange(r);
-          }
+        if (mod && /^[bB]$/.test(e.key)) { e.preventDefault(); mdInline('**'); return; }
+        if (mod && /^[iI]$/.test(e.key)) { e.preventDefault(); mdInline('*'); return; }
+        if (mod && /^[uU]$/.test(e.key)) { e.preventDefault(); mdInline('__'); return; }
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          const s = mdTextarea.selectionStart, end2 = mdTextarea.selectionEnd;
+          mdTextarea.value = mdTextarea.value.slice(0, s) + '  ' + mdTextarea.value.slice(end2);
+          mdTextarea.selectionStart = mdTextarea.selectionEnd = s + 2;
         }
+        if (e.key === 'Escape') { e.preventDefault(); exitEdit(); }
       });
 
-      window.addEventListener('keydown', (e) => {
-        if (!(e.ctrlKey || e.metaKey) || !/^[sS]$/.test(e.key)) return;
-        if (noteCard.contains(document.activeElement)) { e.preventDefault(); saveNow(); }
-      }, { capture: true });
+      // ── Toolbar buttons ──
+      mdToolbar && mdToolbar.addEventListener('mousedown', (e) => {
+        const btn = e.target.closest('.md-tb-btn');
+        if (!btn) return;
+        e.preventDefault(); // keep textarea focus
+        const md  = btn.dataset.md || '';
+        const isLine = btn.hasAttribute('data-line');
+        if (isLine) { mdPrefix(md); } else { mdInline(md); }
+      });
 
       follow.appendChild(noteCard);
     } else {
