@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      10.2
-// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion
+// @version      11.0
+// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
 // @match        https://livret.uness.fr/lisa/2025/Cat*gorie:Situation_de_d*part
@@ -65,6 +65,13 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
     cacheTTLms: 48 * 60 * 60 * 1000,
     autosaveDelay: 15000,
     indentSpaces:    2,
+    // Upload ECOS config
+    ecos: {
+      maxFileSizeMB: 50,
+      allowedTypes:  ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'],
+      allowedExt:    ['.pdf', '.png', '.jpg', '.jpeg'],
+      storageBucket: 'uneisa-26e34.firebasestorage.app',
+    },
     cloud: {
       enabled: true,
       usernameKey: 'uness_cloud_user_v1',
@@ -92,7 +99,6 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   const DONE_PREFIX      = 'uness_sdd_done_v1_';
   const NOTES_PREFIX     = 'uness_sdd_notes_v1_';
   const COLLAPSE_PREFIX  = 'uness_sdd_collapse_v1_';
-  // NEW: status ('todo' | 'inprogress' | 'done') and done date (ISO string)
   const STATUS_PREFIX    = 'uness_sdd_status_v1_';
   const DONE_DATE_PREFIX = 'uness_sdd_donedate_v1_';
 
@@ -105,73 +111,60 @@ const SDD_TAGS = {1:["Hépato-Gastro-Entérologie"],2:["Hépato-Gastro-Entérolo
   // ── Révision espacée ──────────────────────────────────────────────────────
   const REVIEW_PREFIX = 'uness_sdd_review_v1_';
   const reviewKey = (n) => REVIEW_PREFIX + pad3(n);
-  // Stocke { lastReview: ISO, step: 0|1|2|3 } — paliers J+1/J+3/J+7/J+30
   const REVIEW_STEPS = [1, 3, 7, 30];
+
 function gsParse(gsUrl) {
   const m = String(gsUrl || '').match(/^gs:\/\/([^/]+)\/(.+)$/);
   if (!m) return null;
   return { bucket: m[1], path: m[2] };
 }
 
-
 function normalizeToFirebaseEndpoint(u) {
   const s = String(u || '').trim();
-
-  // gs://bucket/path -> firebasestorage
   let m = s.match(/^gs:\/\/([^/]+)\/(.+)$/);
   if (m) {
     const bucket = m[1], path = m[2];
     return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
   }
-
-  // https://storage.googleapis.com/bucket/path -> firebasestorage
   m = s.match(/^https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/);
   if (m) {
     const bucket = m[1], path = m[2];
     return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
   }
-
   return s;
 }
+
 function makePublicHttpUrl(bucket, path) {
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
 }
 
-// Essaie plusieurs buckets et retourne la 1ère URL qui ne fait pas 404/403
 async function resolvePublicEcosUrl(gsUrl) {
   const p = gsParse(gsUrl);
   if (!p) return '';
-
   const candidates = [
-    p.bucket,                          // ex: uneisa-26e34.firebasestorage.app
-    `${CFG.cloud.projectId}.appspot.com`, // ex: uneisa-26e34.appspot.com
+    p.bucket,
+    `${CFG.cloud.projectId}.appspot.com`,
   ];
-
   for (const b of candidates) {
     const u = makePublicHttpUrl(b, p.path);
     try {
-      // HEAD suffit, plus rapide. Certains serveurs n’aiment pas HEAD -> fallback GET
       let r = await fetch(u, { method: 'HEAD', mode: 'cors' });
       if (r.status === 405 || r.status === 400) r = await fetch(u, { method: 'GET', mode: 'cors' });
-
-      if (r.ok) return u;                 // 200
-      if (r.status === 302 || r.status === 304) return u; // redir OK
-      // si 404/403, on tente le bucket suivant
+      if (r.ok) return u;
+      if (r.status === 302 || r.status === 304) return u;
     } catch (_) {}
   }
-
-  // Rien n'a marché -> on renvoie la 1ère pour debug
   return makePublicHttpUrl(candidates[0], p.path);
 }
+
 function gsToPublicHttp(gsUrl) {
   const m = String(gsUrl || '').match(/^gs:\/\/([^/]+)\/(.+)$/);
   if (!m) return '';
   const bucket = m[1];
   const path   = m[2];
-
-  // ✅ endpoint Firebase Storage (applique les rules)
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
 }
+
   function getReview(n) {
     try { return JSON.parse(GM_getValue(reviewKey(n), 'null')) || null; } catch { return null; }
   }
@@ -179,7 +172,6 @@ function gsToPublicHttp(gsUrl) {
     GM_setValue(reviewKey(n), JSON.stringify(obj));
     cloudSchedulePush();
   }
-  // Retourne true si cette SDD est due à réviser aujourd'hui
   function isDueForReview(n) {
     const r = getReview(n);
     if (!r || !r.lastReview) return false;
@@ -187,40 +179,32 @@ function gsToPublicHttp(gsUrl) {
     const needed = REVIEW_STEPS[Math.min(r.step, REVIEW_STEPS.length - 1)];
     return daysSince >= needed;
   }
-  // Appelé quand on marque une SDD comme révisée → avance le palier
   function markReviewed(n) {
     const r = getReview(n) || { step: 0 };
     const nextStep = Math.min((r.step || 0) + 1, REVIEW_STEPS.length - 1);
     setReview(n, { lastReview: new Date().toISOString(), step: nextStep });
   }
-  // Initialise la révision quand une SDD passe à "done"
   function initReview(n) {
     const existing = getReview(n);
     if (!existing) setReview(n, { lastReview: new Date().toISOString(), step: 0 });
   }
 
-  // ── Status helpers ──────────────────────────────────────────────────────
-  // Returns 'todo' | 'inprogress' | 'done'
   function getStatus(n) {
     const v = GM_getValue(statusKey(n), '');
     if (v === 'inprogress' || v === 'done') return v;
-    // Legacy fallback: read old boolean done key
     if (GM_getValue(doneKey(n), false)) return 'done';
     return 'todo';
   }
 
   function setStatus(n, status) {
     GM_setValue(statusKey(n), status);
-    // Keep legacy done key in sync for backward compat
     GM_setValue(doneKey(n), status === 'done');
     if (status === 'done') {
-      // Save date only if not already set (preserve original completion date)
       if (!GM_getValue(doneDateKey(n), '')) {
         GM_setValue(doneDateKey(n), new Date().toISOString());
       }
       initReview(n);
     } else {
-      // Clear done date when un-marking
       GM_setValue(doneDateKey(n), '');
     }
     cloudSchedulePush();
@@ -230,7 +214,6 @@ function gsToPublicHttp(gsUrl) {
     return GM_getValue(doneDateKey(n), '');
   }
 
-  // Format date for display: "23 fév." or "23 fév. 2024"
   function formatDoneDate(iso, includeYear = false) {
     if (!iso) return '';
     try {
@@ -241,7 +224,6 @@ function gsToPublicHttp(gsUrl) {
     } catch { return ''; }
   }
 
-  // Legacy compatibility
   const isDone   = (n)    => getStatus(n) === 'done';
   const setDone  = (n, v) => setStatus(n, v ? 'done' : 'todo');
 
@@ -303,37 +285,21 @@ function gsToPublicHttp(gsUrl) {
         --success:#10b981; --success-light:#d1fae5;
         --warning:#f59e0b; --warning-light:#fef3c7;
         --danger:#ef4444; --danger-light:#fee2e2;
-        --r:12px; --r-sm:8px;
-        --sh:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
-        --sh2:0 10px 26px rgba(0,0,0,.10);
-        --sh-focus:0 0 0 3px rgba(79,70,229,.2);
-
+        --inprogress:#fb923c; --inprogress-light:#fff7ed;
+        --r:8px; --r-sm:8px;
+        --sh:none;
+        --sh2:none;
+        --sh-focus:0 0 0 2px rgba(79,70,229,.15);
         --ff:'${escapeHtml(CFG.fontFamily)}',system-ui,sans-serif;
-
-        --fs-base:${CFG.fsBase}px;
-        --fs-small:${CFG.fsSmall}px;
-        --fs-tiny:${CFG.fsTiny}px;
-        --fs-title:${CFG.fsTitle}px;
-        --fs-h1:${CFG.fsH1}px;
-        --fs-h2:${CFG.fsH2}px;
-        --fs-h3:${CFG.fsH3}px;
-        --fs-h4:${CFG.fsH4}px;
-        --fs-row:${CFG.fsRow}px;
-        --fs-rownum:${CFG.fsRowNum}px;
-        --fs-chip:${CFG.fsChip}px;
-        --fs-table:${CFG.fsTable}px;
-        --fs-notes:${CFG.fsNotes}px;
-
-        --fw-base:${CFG.fwBase};
-        --fw-med:${CFG.fwMedium};
-        --fw-semi:${CFG.fwSemibold};
-        --fw-bold:${CFG.fwBold};
-        --fw-heavy:${CFG.fwHeavy};
-
+        --fs-base:${CFG.fsBase}px; --fs-small:${CFG.fsSmall}px; --fs-tiny:${CFG.fsTiny}px;
+        --fs-title:${CFG.fsTitle}px; --fs-h1:${CFG.fsH1}px; --fs-h2:${CFG.fsH2}px;
+        --fs-h3:${CFG.fsH3}px; --fs-h4:${CFG.fsH4}px; --fs-row:${CFG.fsRow}px;
+        --fs-rownum:${CFG.fsRowNum}px; --fs-chip:${CFG.fsChip}px;
+        --fs-table:${CFG.fsTable}px; --fs-notes:${CFG.fsNotes}px;
+        --fw-base:${CFG.fwBase}; --fw-med:${CFG.fwMedium}; --fw-semi:${CFG.fwSemibold};
+        --fw-bold:${CFG.fwBold}; --fw-heavy:${CFG.fwHeavy};
         --notes-col:${CFG.notesColWidth}px;
-        --rails-min:${CFG.railsMin}px;
-        --rails-max:${CFG.railsMax}px;
-
+        --rails-min:${CFG.railsMin}px; --rails-max:${CFG.railsMax}px;
         --transition:.15s ease;
       }
     `;
@@ -363,7 +329,6 @@ function gsToPublicHttp(gsUrl) {
     s = s.replace(/(<li>.*<\/li>\n?)+/g, m =>
       `<ul style="margin:.1em 0;padding-left:1.1em;list-style:disc;color:var(--text2);font-size:12px">${m.replace(/<\/li>\n<li>/g,'</li><li>')}</ul>`
     );
-    // Retours à la ligne simples → <br>, doubles → nouveau paragraphe
     s = s.replace(/\n(?!\n)/g, '<br>');
     s = s.split(/\n+/).map(block => {
       const t = block.trim();
@@ -375,58 +340,7 @@ function gsToPublicHttp(gsUrl) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // HELPERS TEXTAREA
-  // ══════════════════════════════════════════════════════════════════════════
-  function wrapSelection(ta, left, right) {
-    const { selectionStart: s, selectionEnd: e, value: v } = ta;
-    const sel = v.slice(s, e);
-    ta.value = v.slice(0, s) + left + sel + right + v.slice(e);
-    if (sel.length) {
-      ta.selectionStart = s + left.length;
-      ta.selectionEnd   = s + left.length + sel.length;
-    } else {
-      ta.selectionStart = ta.selectionEnd = s + left.length;
-    }
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-
-  function indentSelection(ta, spaces = CFG.indentSpaces) {
-    const { selectionStart: s, selectionEnd: e, value: v } = ta;
-    const pref = ' '.repeat(spaces);
-    if (s === e) {
-      ta.value = v.slice(0, s) + pref + v.slice(e);
-      ta.selectionStart = ta.selectionEnd = s + pref.length;
-    } else {
-      const out = v.slice(s, e).split('\n').map(l => pref + l).join('\n');
-      ta.value = v.slice(0, s) + out + v.slice(e);
-      ta.selectionStart = s;
-      ta.selectionEnd   = s + out.length;
-    }
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-
-  function outdentSelection(ta, spaces = CFG.indentSpaces) {
-    const { selectionStart: s, selectionEnd: e, value: v } = ta;
-    if (s === e) return;
-    const pref = ' '.repeat(spaces);
-    const out = v.slice(s, e).split('\n')
-      .map(l => l.startsWith(pref) ? l.slice(spaces) : l.startsWith(' ') ? l.slice(1) : l)
-      .join('\n');
-    ta.value = v.slice(0, s) + out + v.slice(e);
-    ta.selectionStart = s;
-    ta.selectionEnd   = s + out.length;
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-
-  function tagsForNum(n) {
-    try {
-      if (typeof SDD_TAGS !== 'undefined' && SDD_TAGS?.[n]) return SDD_TAGS[n];
-    } catch (_) {}
-    return [];
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // CLOUD SYNC — Firebase Auth (Email/Password) + Firestore REST
+  // CLOUD SYNC — Firebase Auth + Firestore REST
   // ══════════════════════════════════════════════════════════════════════════
   const TOKEN_KEY = 'uness_cloud_token_v1';
 
@@ -489,15 +403,11 @@ function gsToPublicHttp(gsUrl) {
     } catch (signUpErr) {
       const msg = signUpErr.message || '';
       if (msg.includes('EMAIL_EXISTS') || msg.includes('DUPLICATE')) {
-        try {
-          const j = await firebasePost(
-            `${IDENTITY_URL}/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
-            { email, password: pin, returnSecureToken: true }
-          );
-          return storeToken(j);
-        } catch (signInErr) {
-          throw signInErr;
-        }
+        const j = await firebasePost(
+          `${IDENTITY_URL}/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
+          { email, password: pin, returnSecureToken: true }
+        );
+        return storeToken(j);
       }
       throw signUpErr;
     }
@@ -542,11 +452,8 @@ function gsToPublicHttp(gsUrl) {
       while (!pinOk) {
         pin = (prompt('Cloud — PIN (min. 6 caractères, stocké localement) :') || '').trim();
         if (!pin) return null;
-        if (pin.length >= 6) {
-          pinOk = true;
-        } else {
-          alert('⚠️ PIN trop court — minimum 6 caractères requis par Firebase.');
-        }
+        if (pin.length >= 6) pinOk = true;
+        else alert('⚠️ PIN trop court — minimum 6 caractères requis par Firebase.');
       }
       setCloudPin(pin);
     } else if (pin.length < 6) {
@@ -677,7 +584,6 @@ function gsToPublicHttp(gsUrl) {
   async function communityMigrateIfNeeded() {
     if (!cloudEnabled()) return;
     if (GM_getValue(MIGRATE_KEY, false)) return;
-
     try {
       const notes = {};
       GM_listValues().forEach(k => {
@@ -687,12 +593,7 @@ function gsToPublicHttp(gsUrl) {
         const num = k.replace(NOTES_PREFIX, '');
         notes[num] = val;
       });
-
-      if (Object.keys(notes).length === 0) {
-        GM_setValue(MIGRATE_KEY, true);
-        return;
-      }
-
+      if (Object.keys(notes).length === 0) { GM_setValue(MIGRATE_KEY, true); return; }
       await callFunction('migrateAllNotes', { notes });
       GM_setValue(MIGRATE_KEY, true);
     } catch (e) {
@@ -702,26 +603,16 @@ function gsToPublicHttp(gsUrl) {
 
   async function publicNoteMirrorPush(sddN, md) {
     if (!cloudEnabled() || !sddN) return;
-    try {
-      await callFunction('mirrorPublicNote', { sddN, note: md || '' });
-    } catch (e) {
-      console.warn('[UNESS-COMMUNITY] mirrorPublicNote échoué:', e.message);
-    }
+    try { await callFunction('mirrorPublicNote', { sddN, note: md || '' }); } catch (_) {}
   }
 
   async function communityNotesLoad(sddN, sddName, containerEl) {
     if (!cloudEnabled() || !sddN) return;
-
     containerEl.innerHTML = communityLoadingHTML();
-
     try {
       const result = await callFunction('generateCommunitySummary', { sddN, sddName });
       const { summary, noteCount, updatedAt } = result;
-
-      if (!summary) {
-        containerEl.innerHTML = communityEmptyHTML();
-        return;
-      }
+      if (!summary) { containerEl.innerHTML = communityEmptyHTML(); return; }
       containerEl.innerHTML = communitySummaryHTML(summary, noteCount, updatedAt);
     } catch (e) {
       containerEl.innerHTML = communityErrorHTML(e.message);
@@ -730,23 +621,17 @@ function gsToPublicHttp(gsUrl) {
 
   function communitySummaryHTML(summary, noteCount, updatedAt) {
     if (!summary || !summary.trim()) return communityEmptyHTML();
-
     const date = new Date(updatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
     const meta = '<div style="font-size:var(--fs-tiny);color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">'
-      + 'Synthèse de <strong style="color:var(--text)">' + noteCount + '</strong> note(s) · Générée le ' + date
-      + '</div>';
-
+      + 'Synthèse de <strong style="color:var(--text)">' + noteCount + '</strong> note(s) · Générée le ' + date + '</div>';
     return meta + communityMarkdownToHtml(summary);
   }
 
   function communityMarkdownToHtml(md) {
     if (!md) return '';
-
     const lines  = md.split('\n');
     let   html   = '';
     let   inList = false;
-
     lines.forEach(function(line) {
       if (line.startsWith('### ')) {
         if (inList) { html += '</ul>'; inList = false; }
@@ -766,7 +651,6 @@ function gsToPublicHttp(gsUrl) {
           + inlineMarkdown(line.slice(2)) + '</div>';
         return;
       }
-
       var bulletMatch = line.match(/^(\s*)[-*] (.+)$/);
       if (bulletMatch) {
         if (!inList) { html += '<ul style="margin:4px 0 10px 18px;padding:0;list-style:disc">'; inList = true; }
@@ -775,14 +659,11 @@ function gsToPublicHttp(gsUrl) {
           + inlineMarkdown(bulletMatch[2]) + '</li>';
         return;
       }
-
       if (!line.trim()) {
         if (inList) { html += '</ul>'; inList = false; }
         return;
       }
-
       if (/^\|[-:| ]+\|$/.test(line.trim())) return;
-
       if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
         if (inList) { html += '</ul>'; inList = false; }
         var cells = line.trim().slice(1, -1).split('|');
@@ -792,18 +673,14 @@ function gsToPublicHttp(gsUrl) {
         }).join('') + '</tr>';
         return;
       }
-
       if (inList) { html += '</ul>'; inList = false; }
       html += '<p style="margin:6px 0;color:var(--text2);font-size:var(--fs-small);line-height:1.65">'
         + inlineMarkdown(line) + '</p>';
     });
-
     if (inList) html += '</ul>';
-
     html = html.replace(/(<tr>.*?<\/tr>)+/gs, function(match) {
       return '<div style="overflow-x:auto;margin:10px 0"><table style="width:100%;border-collapse:collapse">' + match + '</table></div>';
     });
-
     return html;
   }
 
@@ -822,116 +699,46 @@ function gsToPublicHttp(gsUrl) {
       Chargement de la synthèse communautaire…
     </div>`;
   }
-
   function communityEmptyHTML() {
     return `<p style="color:var(--muted);font-size:var(--fs-small);font-style:italic;margin:0">
-      Pas encore assez de notes pour générer une synthèse.
-    </p>`;
+      Pas encore assez de notes pour générer une synthèse.</p>`;
   }
-
   function communityErrorHTML(msg) {
     return `<p style="color:var(--danger);font-size:var(--fs-small);margin:0">
-      ⚠ Erreur : ${escapeHtml(msg)}
-    </p>`;
+      ⚠ Erreur : ${escapeHtml(msg)}</p>`;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // DEBUG CONSOLE
+  // DEBUG
   // ══════════════════════════════════════════════════════════════════════════
   window.debugCloud = async function () {
     const log  = (emoji, msg, data) => console.log(`${emoji} [UNESS-CLOUD] ${msg}`, data ?? '');
-    const warn = (msg, data)        => console.warn(`⚠️  [UNESS-CLOUD] ${msg}`, data ?? '');
-    const err  = (msg, e)           => console.error(`❌ [UNESS-CLOUD] ${msg}`, e ?? '');
-
     log('🔍', '=== DEBUG FIREBASE START ===');
     log('✅', 'cloudEnabled():', cloudEnabled());
-    if (!cloudEnabled()) { warn('Cloud désactivé ou config manquante. Arrêt.'); return; }
-
-    const username = getCloudUsername();
-    const pin      = getCloudPin();
-    log('👤', 'Username stocké:', username || '(vide)');
-
     const tok = loadToken();
-    log('🎟️ ', 'Token actuel:', {
-      uid:      tok?.uid || '(aucun)',
-      hasToken: !!tok?.idToken,
-      expired:  tok?.expiresAt ? Date.now() > tok.expiresAt : true,
-    });
-
-    log('🔄', 'Test refresh token...');
-    try {
-      const refreshed = await cloudRefreshIfNeeded();
-      if (refreshed?.idToken) log('✅', 'Refresh OK — uid:', refreshed.uid);
-      else warn('Refresh retourné vide.');
-    } catch (e) { err('Refresh échoué:', e); }
-
-    log('📥', 'Test cloudPull()...');
-    try {
-      const data = await cloudPull();
-      if (data === null) log('ℹ️ ', 'Pull OK — document inexistant (1er usage).');
-      else log('✅', `Pull OK — ${Object.keys(data).length} clés`);
-    } catch (e) { err('cloudPull() échoué:', e); }
-
-    log('📤', 'Test cloudPush()...');
-    try {
-      await cloudPush(exportLocalState());
-      log('✅', 'Push OK');
-    } catch (e) { err('cloudPush() échoué:', e); }
-
+    log('🎟️ ', 'Token actuel:', { uid: tok?.uid || '(aucun)', hasToken: !!tok?.idToken });
+    try { const refreshed = await cloudRefreshIfNeeded(); log('✅', 'Refresh OK — uid:', refreshed.uid); } catch (e) { console.error('Refresh échoué:', e); }
+    try { const data = await cloudPull(); log('✅', `Pull OK — ${Object.keys(data||{}).length} clés`); } catch (e) { console.error('cloudPull() échoué:', e); }
+    try { await cloudPush(exportLocalState()); log('✅', 'Push OK'); } catch (e) { console.error('cloudPush() échoué:', e); }
     log('🏁', '=== DEBUG FIREBASE END ===');
     return '✅ Debug terminé — voir les logs';
   };
-
-  window.debugCloudReset = function () {
-    setCloudUsername('');
-    setCloudPin('');
-    saveToken({});
-    console.log('🔄 [UNESS-CLOUD] Credentials réinitialisés.');
-  };
-
+  window.debugCloudReset = function () { setCloudUsername(''); setCloudPin(''); saveToken({}); console.log('🔄 Credentials réinitialisés.'); };
   window.debugLocalState = function () {
     const state = exportLocalState();
-    console.table(
-      Object.entries(state).map(([k, v]) => ({ clé: k, valeur: String(v).slice(0, 60) }))
-    );
+    console.table(Object.entries(state).map(([k, v]) => ({ clé: k, valeur: String(v).slice(0, 60) })));
     return state;
   };
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // DÉCONNEXION CLOUD
-  // ══════════════════════════════════════════════════════════════════════════
-  window.cloudDisconnect = function () {
-    setCloudUsername('');
-    setCloudPin('');
-    saveToken({});
-    location.reload();
-  };
+  window.cloudDisconnect = function () { setCloudUsername(''); setCloudPin(''); saveToken({}); location.reload(); };
 
   const LOGOUT_BTN_CSS = `
     .btn-logout {
-      padding: 4px 8px;
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: var(--r-sm);
-      color: var(--muted);
-      font-size: var(--fs-tiny);
-      font-family: inherit;
-      cursor: pointer;
-      opacity: .45;
-      transition: all var(--transition);
-      line-height: 1;
-      flex-shrink: 0;
+      padding:4px 8px;background:transparent;border:1px solid var(--border);
+      border-radius:var(--r-sm);color:var(--muted);font-size:var(--fs-tiny);
+      font-family:inherit;cursor:pointer;opacity:.45;transition:all var(--transition);line-height:1;flex-shrink:0;
     }
-    .btn-logout:hover {
-      opacity: 1;
-      color: var(--danger);
-      border-color: #fca5a5;
-      background: var(--danger-light);
-    }
+    .btn-logout:hover{opacity:1;color:var(--danger);border-color:#fca5a5;background:var(--danger-light)}
   `;
-
-  console.log('%c[UNESS-SDD] 🛠 Debug dispo: debugCloud() | debugCloudReset() | debugLocalState() | cloudDisconnect()',
-    'background:#4f46e5;color:#fff;padding:4px 8px;border-radius:6px;font-weight:bold');
 
   // ══════════════════════════════════════════════════════════════════════════
   // ROUTING
@@ -958,7 +765,7 @@ function gsToPublicHttp(gsUrl) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // DONNÉES (liste SDD)
+  // DONNÉES
   // ══════════════════════════════════════════════════════════════════════════
   async function getData() {
     let pageItems;
@@ -972,9 +779,13 @@ function gsToPublicHttp(gsUrl) {
     }
     return pageItems.map(item => {
       const tags = tagsForNum(item.num);
-      // status/done are read fresh in render() per cycle — not cached here
       return { ...item, tags, family: tags[0] || '', status: 'todo', done: false };
     });
+  }
+
+  function tagsForNum(n) {
+    try { if (typeof SDD_TAGS !== 'undefined' && SDD_TAGS?.[n]) return SDD_TAGS[n]; } catch (_) {}
+    return [];
   }
 
   async function fetchPageItems() {
@@ -982,13 +793,10 @@ function gsToPublicHttp(gsUrl) {
       const r = await fetch(url, {
         credentials: 'include',
         headers: { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
-        referrer: ref,
-        method: 'GET',
-        mode: 'cors',
+        referrer: ref, method: 'GET', mode: 'cors',
       });
       return r.text();
     }
-
     function parse(html) {
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const out = [];
@@ -996,27 +804,14 @@ function gsToPublicHttp(gsUrl) {
         const title = a.getAttribute('title') || a.textContent.trim();
         const m = title.match(/SDD-(\d+)/i);
         if (!m) return;
-        out.push({
-          title,
-          href: BASE + a.getAttribute('href'),
-          num:  parseInt(m[1], 10),
-          name: title.replace(/\s*SDD-\d+\s*/i, '').trim(),
-        });
+        out.push({ title, href: BASE + a.getAttribute('href'), num: parseInt(m[1], 10), name: title.replace(/\s*SDD-\d+\s*/i, '').trim() });
       });
       return out;
     }
-
     const [h1, h2] = await Promise.all([
-      getPage(
-        BASE + '/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part',
-        BASE + '/lisa/2025/Accueil'
-      ),
-      getPage(
-        BASE + '/lisa/2025/index.php?title=Cat%C3%A9gorie:Situation_de_d%C3%A9part&pagefrom=Leucorrh%C3%A9es+SDD-104#mw-pages',
-        BASE + '/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part'
-      ),
+      getPage(BASE + '/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part', BASE + '/lisa/2025/Accueil'),
+      getPage(BASE + '/lisa/2025/index.php?title=Cat%C3%A9gorie:Situation_de_d%C3%A9part&pagefrom=Leucorrh%C3%A9es+SDD-104#mw-pages', BASE + '/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part'),
     ]);
-
     const seen = new Set();
     return [...parse(h1), ...parse(h2)].filter(i => {
       if (seen.has(i.num)) return false;
@@ -1066,287 +861,84 @@ function gsToPublicHttp(gsUrl) {
       <style>
       *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
       ${cssVarsRoot()}
-
-      html,body{
-        background:var(--bg);color:var(--text);height:100%;
-        font-family:var(--ff);font-size:var(--fs-base);font-weight:var(--fw-base);
-        overflow-x:hidden;
-      }
-
-      /* ── Header ── */
-      header{
-        background:var(--surface);border-bottom:1px solid var(--border);
-        padding:16px 40px;display:flex;align-items:center;gap:14px;box-shadow:var(--sh);
-      }
-      .h-badge{
-        background:var(--ac);color:#fff;
-        font-size:var(--fs-tiny);font-weight:var(--fw-bold);
-        letter-spacing:.9px;text-transform:uppercase;
-        padding:5px 10px;border-radius:var(--r-sm);flex-shrink:0;
-      }
-      header h1{
-        font-size:calc(var(--fs-base) + 1px);font-weight:var(--fw-semi);
-        color:var(--text);letter-spacing:-.2px;
-      }
+      html,body{background:var(--bg);color:var(--text);height:100%;font-family:var(--ff);font-size:var(--fs-base);font-weight:var(--fw-base);overflow-x:hidden}
+      header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 40px;display:flex;align-items:center;gap:14px;}
+      .h-badge{background:var(--ac);color:#fff;font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.9px;text-transform:uppercase;padding:5px 10px;border-radius:var(--r-sm);flex-shrink:0}
+      header h1{font-size:calc(var(--fs-base) + 1px);font-weight:var(--fw-semi);color:var(--text);letter-spacing:-.2px}
       header h1 span{font-size:var(--fs-small);color:var(--muted);margin-left:10px;font-weight:var(--fw-med)}
-      .h-back{
-        margin-left:auto;color:var(--muted);text-decoration:none;font-size:var(--fs-small);
-        padding:8px 14px;border:1px solid var(--border);border-radius:var(--r);
-        transition:all var(--transition);background:var(--surface2);font-weight:var(--fw-med);
-        white-space:nowrap;
-      }
+      .h-back{margin-left:auto;color:var(--muted);text-decoration:none;font-size:var(--fs-small);padding:8px 14px;border:1px solid var(--border);border-radius:var(--r);transition:all var(--transition);background:var(--surface2);font-weight:var(--fw-med);white-space:nowrap}
       .h-back:hover{color:var(--text);border-color:var(--border2);background:#fff}
-
-      /* ── Barre de contrôle ── */
-      .ctrl{
-        position:sticky;top:0;z-index:200;
-        background:rgba(241,245,249,.97);backdrop-filter:blur(10px);
-        border-bottom:1px solid var(--border);
-        padding:10px 40px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
-      }
-
+      .ctrl{position:sticky;top:0;z-index:200;background:rgba(241,245,249,.97);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:10px 40px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
       .search-wrap{position:relative;flex:1;min-width:220px;max-width:400px}
-      .search-wrap svg{
-        position:absolute;left:10px;top:50%;transform:translateY(-50%);
-        color:var(--muted);pointer-events:none;
-      }
-      #search{
-        width:100%;padding:9px 11px 9px 34px;
-        background:#fff;border:1px solid var(--border);border-radius:var(--r);
-        color:var(--text);font-size:var(--fs-small);font-family:inherit;outline:none;
-        transition:border-color var(--transition),box-shadow var(--transition);
-      }
+      .search-wrap svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+      #search{width:100%;padding:9px 11px 9px 34px;background:#fff;border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:var(--fs-small);font-family:inherit;outline:none;transition:border-color var(--transition),box-shadow var(--transition)}
       #search::placeholder{color:var(--muted)}
-      #search:focus{border-color:var(--ac);box-shadow:var(--sh-focus)}
-
-      select{
-        padding:9px 12px;background:#fff;border:1px solid var(--border);
-        border-radius:var(--r);color:var(--text2);font-size:var(--fs-small);
-        font-family:inherit;outline:none;cursor:pointer;
-        transition:border-color var(--transition),box-shadow var(--transition);
-      }
-      select:focus{border-color:var(--ac);box-shadow:var(--sh-focus)}
-
+      #search:focus{border-color:var(--ac)}
+      select{padding:9px 12px;background:#fff;border:1px solid var(--border);border-radius:var(--r);color:var(--text2);font-size:var(--fs-small);font-family:inherit;outline:none;cursor:pointer;transition:border-color var(--transition),box-shadow var(--transition)}
+      select:focus{border-color:var(--ac)}
       .sort-btns{display:flex;gap:6px}
-      .sort-btns button{
-        padding:8px 12px;background:#fff;border:1px solid var(--border);
-        border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);
-        font-family:inherit;font-weight:var(--fw-med);cursor:pointer;
-        transition:all var(--transition);white-space:nowrap;
-      }
+      .sort-btns button{padding:8px 12px;background:#fff;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:all var(--transition);white-space:nowrap}
       .sort-btns button:hover{color:var(--text);border-color:var(--border2)}
-      .sort-btns button.on{
-        background:var(--ac);color:#fff;border-color:var(--ac);
-        box-shadow:0 4px 12px rgba(79,70,229,.3);
-      }
-
+      .sort-btns button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
       #stats{font-size:var(--fs-small);color:var(--muted);white-space:nowrap;margin-left:auto;font-weight:var(--fw-med)}
-
-      #btn-rf{
-        padding:8px 12px;background:transparent;border:1px solid var(--border);
-        border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);
-        font-family:inherit;font-weight:var(--fw-med);cursor:pointer;
-        transition:all var(--transition);
-      }
+      #btn-rf{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:all var(--transition)}
       #btn-rf:hover{color:var(--danger);border-color:#fca5a5;background:var(--danger-light)}
-
-      /* ── Liste ── */
       main{padding:20px 40px 70px}
       #list{display:flex;flex-direction:column;gap:6px}
-
-      .row{
-        display:grid;
-        grid-template-columns:104px 1fr auto auto 26px 18px;
-        align-items:center;gap:12px;
-        padding:10px 16px;
-        background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
-        text-decoration:none;color:var(--text);
-        box-shadow:var(--sh);
-      }
+      .row{display:grid;grid-template-columns:104px 1fr auto auto 26px 18px;align-items:center;gap:12px;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);text-decoration:none;color:var(--text)}
       .row:hover{border-color:var(--border2);background:#fafcff}
-
-      /* Numéro avec point de statut intégré */
-      .row-num{
-        font-size:var(--fs-rownum);font-weight:var(--fw-bold);
-        color:var(--muted);font-variant-numeric:tabular-nums;
-        display:flex;align-items:center;gap:5px;
-      }
-      .row-num::before{
-        content:'';display:inline-block;
-        width:7px;height:7px;border-radius:50%;flex-shrink:0;
-        background:#cbd5e1;
-      }
+      .row-num{font-size:var(--fs-rownum);font-weight:var(--fw-bold);color:var(--muted);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:5px}
+      .row-num::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#cbd5e1}
       .row-inprogress .row-num::before{background:#fb923c}
       .row-done       .row-num::before{background:#34d399}
-
-      .row-name{
-        font-size:var(--fs-row);font-weight:var(--fw-med);color:var(--text2);
-        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
-      }
+      .row-name{font-size:var(--fs-row);font-weight:var(--fw-med);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
       .row:hover .row-name{color:var(--ac)}
-
       .row-tags{display:flex;gap:6px;flex-wrap:nowrap;overflow:hidden;justify-content:flex-end}
-      .row-pill{
-        font-size:var(--fs-tiny);font-weight:var(--fw-semi);
-        padding:3px 9px;border-radius:999px;white-space:nowrap;flex-shrink:0;
-      }
-
+      .row-pill{font-size:var(--fs-tiny);font-weight:var(--fw-semi);padding:3px 9px;border-radius:999px;white-space:nowrap;flex-shrink:0}
       .row-arr{color:var(--border2);font-size:17px;justify-self:end}
       .row:hover .row-arr{color:var(--ac)}
-
-      /* Checkbox — style indigo original, sans effets lourds */
-      .row-ck{
-        width:26px;height:26px;border-radius:var(--r-sm);
-        border:1.5px solid var(--border2);
-        display:grid;place-items:center;
-        color:transparent;background:#fff;cursor:pointer;
-        user-select:none;font-size:15px;font-weight:var(--fw-bold);
-        flex-shrink:0;
-      }
+      .row-ck{width:26px;height:26px;border-radius:var(--r-sm);border:1.5px solid var(--border2);display:grid;place-items:center;color:transparent;background:#fff;cursor:pointer;user-select:none;font-size:15px;font-weight:var(--fw-bold);flex-shrink:0}
       .row-ck:hover{border-color:var(--ac)}
       .row-ck.on{background:var(--ac);border-color:var(--ac);color:#fff}
-
       .row-done .row-name{color:var(--muted);text-decoration:line-through}
       .row-done .row-num{opacity:.55}
-
-      .no-results{
-        text-align:center;padding:70px 20px;color:var(--muted);
-        font-size:var(--fs-base);
-      }
+      .no-results{text-align:center;padding:70px 20px;color:var(--muted);font-size:var(--fs-base)}
       .no-results span{font-size:32px;display:block;margin-bottom:12px}
-
-      /* ── Badge révision ── */
-      .row-review{
-        font-size:10px;font-weight:var(--fw-bold);
-        padding:2px 6px;border-radius:999px;
-        background:#fef3c7;color:#d97706;
-        cursor:pointer;flex-shrink:0;
-        border:none;font-family:inherit;
-        line-height:1.4;
-      }
+      .row-review{font-size:10px;font-weight:var(--fw-bold);padding:2px 6px;border-radius:999px;background:#fef3c7;color:#d97706;cursor:pointer;flex-shrink:0;border:none;font-family:inherit;line-height:1.4}
       .row-review:hover{background:#fde68a}
-
-      /* ── Bouton Stats ── */
-      #btn-stats{
-        padding:8px 12px;background:transparent;border:1px solid var(--border);
-        border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);
-        font-family:inherit;font-weight:var(--fw-med);cursor:pointer;
-        transition:color var(--transition),border-color var(--transition);
-      }
+      #btn-stats{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:color var(--transition),border-color var(--transition)}
       #btn-stats:hover{color:var(--ac);border-color:var(--ac)}
-
-      /* ── Modal Stats ── */
-      #stats-backdrop{
-        position:fixed;inset:0;background:rgba(15,23,42,.45);
-        z-index:900;display:flex;align-items:flex-end;justify-content:flex-end;
-      }
-      #stats-panel{
-        width:min(520px,96vw);height:100vh;
-        background:var(--surface);border-left:1px solid var(--border);
-        display:flex;flex-direction:column;overflow:hidden;
-        box-shadow:-8px 0 32px rgba(0,0,0,.12);
-      }
-      #stats-panel-head{
-        padding:18px 20px;border-bottom:1px solid var(--border);
-        display:flex;align-items:center;gap:10px;
-        font-size:var(--fs-small);font-weight:var(--fw-bold);color:var(--text);
-        flex-shrink:0;
-      }
-      #stats-panel-head button{
-        margin-left:auto;background:none;border:none;cursor:pointer;
-        font-size:18px;color:var(--muted);line-height:1;padding:4px;
-      }
-      #stats-panel-head button:hover{color:var(--text)}
-      #stats-panel-body{
-        flex:1;overflow-y:auto;padding:20px;
-        display:flex;flex-direction:column;gap:20px;
-      }
-
-      /* Compteurs */
-      .stats-counters{
-        display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
-      }
-      .stat-box{
-        background:var(--surface2);border:1px solid var(--border);
-        border-radius:var(--r-sm);padding:12px 14px;text-align:center;
-      }
-      .stat-box-val{
-        font-size:26px;font-weight:var(--fw-heavy);color:var(--text);
-        line-height:1.1;
-      }
-      .stat-box-lbl{
-        font-size:var(--fs-tiny);color:var(--muted);margin-top:3px;font-weight:var(--fw-med);
-      }
-
-      /* Streak */
-      .stats-streak{
-        background:linear-gradient(135deg,#eef2ff,#f5f3ff);
-        border:1px solid #c7d2fe;border-radius:var(--r-sm);
-        padding:14px 16px;display:flex;align-items:center;gap:14px;
-      }
+      #stats-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:900;display:flex;align-items:flex-end;justify-content:flex-end}
+      #stats-panel{width:min(520px,96vw);height:100vh;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;box-shadow:-2px 0 8px rgba(0,0,0,.06)}
+      #stats-panel-head{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:var(--fs-small);font-weight:var(--fw-bold);color:var(--text);flex-shrink:0}
+      #stats-panel-head button{margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted);line-height:1;padding:4px}
+      #stats-panel-body{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:20px}
+      .stats-counters{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+      .stat-box{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;text-align:center}
+      .stat-box-val{font-size:26px;font-weight:var(--fw-heavy);color:var(--text);line-height:1.1}
+      .stat-box-lbl{font-size:var(--fs-tiny);color:var(--muted);margin-top:3px;font-weight:var(--fw-med)}
+      .stats-streak{background:var(--ac-light);border:1px solid var(--border);border-radius:var(--r-sm);padding:14px 16px;display:flex;align-items:center;gap:14px}
       .streak-fire{font-size:28px;line-height:1}
       .streak-val{font-size:22px;font-weight:var(--fw-heavy);color:var(--ac)}
       .streak-lbl{font-size:var(--fs-tiny);color:var(--muted);font-weight:var(--fw-med)}
-
-      /* Barres spécialités */
-      .stats-section-title{
-        font-size:var(--fs-tiny);font-weight:var(--fw-bold);
-        text-transform:uppercase;letter-spacing:.7px;color:var(--muted);
-        margin-bottom:8px;
-      }
-      .spec-bar-row{
-        display:flex;align-items:center;gap:8px;margin-bottom:7px;
-      }
-      .spec-bar-name{
-        font-size:11px;color:var(--text2);width:140px;flex-shrink:0;
-        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-      }
-      .spec-bar-track{
-        flex:1;height:8px;background:var(--border);border-radius:999px;overflow:hidden;
-      }
-      .spec-bar-fill{
-        height:100%;border-radius:999px;
-        background:linear-gradient(to right,var(--ac),#818cf8);
-        transition:width .4s ease;
-      }
-      .spec-bar-count{
-        font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0;
-      }
-
-      /* Heatmap */
-      .heatmap-grid{
-        display:flex;gap:2px;align-items:flex-end;
-        overflow-x:auto;padding-bottom:4px;
-      }
+      .stats-section-title{font-size:var(--fs-tiny);font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:8px}
+      .spec-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+      .spec-bar-name{font-size:11px;color:var(--text2);width:140px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .spec-bar-track{flex:1;height:8px;background:var(--border);border-radius:999px;overflow:hidden}
+      .spec-bar-fill{height:100%;border-radius:999px;background:var(--ac);transition:width .4s ease}
+      .spec-bar-count{font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0}
+      .heatmap-grid{display:flex;gap:2px;align-items:flex-end;overflow-x:auto;padding-bottom:4px}
       .heatmap-col{display:flex;flex-direction:column;gap:2px}
-      .heatmap-cell{
-        width:11px;height:11px;border-radius:2px;
-        background:var(--border);flex-shrink:0;
-      }
-      .heatmap-cell.l1{background:#c7d2fe}
-      .heatmap-cell.l2{background:#818cf8}
-      .heatmap-cell.l3{background:#6366f1}
-      .heatmap-cell.l4{background:#4338ca}
-      .heatmap-months{
-        display:flex;gap:2px;font-size:10px;color:var(--muted);
-        margin-bottom:3px;overflow-x:auto;
-      }
-
-      /* ── Bouton logout ── */
+      .heatmap-cell{width:11px;height:11px;border-radius:2px;background:var(--border);flex-shrink:0}
+      .heatmap-cell.l1{background:#c7d2fe}.heatmap-cell.l2{background:#818cf8}.heatmap-cell.l3{background:#6366f1}.heatmap-cell.l4{background:#4338ca}
+      .heatmap-months{display:flex;gap:2px;font-size:10px;color:var(--muted);margin-bottom:3px;overflow-x:auto}
       ${LOGOUT_BTN_CSS}
-
-      /* ── Responsive ── */
-      @media(max-width:640px){
-        header,.ctrl,main{padding-left:14px;padding-right:14px}
-        .row{grid-template-columns:90px 1fr 26px 16px}
-        .row-tags{display:none}
-        select{max-width:200px}
-      }
+      @media(max-width:640px){header,.ctrl,main{padding-left:14px;padding-right:14px}.row{grid-template-columns:90px 1fr 26px 16px}.row-tags{display:none}select{max-width:200px}}
+      @keyframes spin{to{transform:rotate(360deg)}}
       </style>`;
 
     document.body.innerHTML = '';
 
-    // Header
     const hdr = document.createElement('header');
     hdr.innerHTML = `
       <div class="h-badge">LISA 2025</div>
@@ -1356,7 +948,6 @@ function gsToPublicHttp(gsUrl) {
       ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
     document.body.appendChild(hdr);
 
-    // Barre de contrôle
     const ctrl = document.createElement('div');
     ctrl.className = 'ctrl';
     ctrl.innerHTML = `
@@ -1366,12 +957,10 @@ function gsToPublicHttp(gsUrl) {
         </svg>
         <input id="search" type="text" placeholder="Rechercher…" autocomplete="off" spellcheck="false">
       </div>
-
       ${hasFamilies ? `<select id="ff" title="Filtrer par spécialité">
         <option value="">Toutes les spécialités</option>
         ${families.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')}
       </select>` : ''}
-
       <select id="st" title="Filtrer par statut">
         <option value="all">Toutes</option>
         <option value="todo">À faire</option>
@@ -1379,14 +968,12 @@ function gsToPublicHttp(gsUrl) {
         <option value="done">Faites ✓</option>
         <option value="review">🔔 À réviser</option>
       </select>
-
       <div class="sort-btns">
         <button class="on" data-s="num">N° ↑</button>
         <button data-s="alpha">A – Z</button>
         ${hasFamilies ? `<button data-s="family">Spécialité</button>` : ''}
         <button data-s="chrono">Récent</button>
       </div>
-
       <span id="stats"></span>
       <button id="btn-rf" title="Vider le cache et recharger la liste">↺</button>`;
     document.body.appendChild(ctrl);
@@ -1397,14 +984,11 @@ function gsToPublicHttp(gsUrl) {
     main.appendChild(list);
     document.body.appendChild(main);
 
-    // État de la vue
     let sort = 'num', query = '', status = 'all', family = '';
 
-    // ── Snapshot statuts + dates en mémoire (évite GM_getValue x356 par render) ──
-    // Chargé une fois, mis à jour au clic uniquement
-    const _st  = new Map(); // num → 'todo'|'inprogress'|'done'
-    const _dd  = new Map(); // num → ISO string | ''
-    const _rv  = new Map(); // num → bool (isDue for review)
+    const _st  = new Map();
+    const _dd  = new Map();
+    const _rv  = new Map();
     for (const item of items) {
       const s = getStatus(item.num);
       _st.set(item.num, s);
@@ -1420,12 +1004,8 @@ function gsToPublicHttp(gsUrl) {
       _dd.set(n, next === 'done' ? (getDoneDate(n) || '') : '');
       _rv.set(n, next === 'done' ? isDueForReview(n) : false);
     }
-    function commitReview(n) {
-      markReviewed(n);
-      _rv.set(n, false); // just reviewed → no longer due
-    }
+    function commitReview(n) { markReviewed(n); _rv.set(n, false); }
 
-    // ── Pré-calcul pills HTML (stable entre renders, basé sur tags seulement) ──
     const _pillsCache = new Map();
     function pillsHTML(item) {
       if (_pillsCache.has(item.num)) return _pillsCache.get(item.num);
@@ -1439,22 +1019,14 @@ function gsToPublicHttp(gsUrl) {
       return html;
     }
 
-    // ── Pré-calcul numéro texte (stable) ──
-    const _numStr = new Map();
-    for (const item of items) _numStr.set(item.num, `SDD-${pad3(item.num)}`);
-
-    // ── Pré-calcul nom en minuscules pour la recherche ──
+    const _numStr    = new Map();
     const _nameLower = new Map();
-    for (const item of items) _nameLower.set(item.num, item.name.toLowerCase());
-
-    // ── Tags en minuscules pré-calculés ──
     const _tagsLower = new Map();
-    for (const item of items) _tagsLower.set(item.num, (item.tags||[]).map(t => t.toLowerCase()));
-
-    // ── Pré-calcul HTML complet de chaque row (nom + pills, partie stable) ──
-    // La partie variable (status, ck) est injectée séparément
     const _rowStableHTML = new Map();
     for (const item of items) {
+      _numStr.set(item.num, `SDD-${pad3(item.num)}`);
+      _nameLower.set(item.num, item.name.toLowerCase());
+      _tagsLower.set(item.num, (item.tags||[]).map(t => t.toLowerCase()));
       _rowStableHTML.set(item.num,
         `<span class="row-num">${_numStr.get(item.num)}</span>` +
         `<span class="row-name">${escapeHtml(item.name)}</span>` +
@@ -1462,29 +1034,21 @@ function gsToPublicHttp(gsUrl) {
       );
     }
 
-    // ── Debounce recherche ──
     let _searchTimer = null;
-    function scheduleRender() {
-      clearTimeout(_searchTimer);
-      _searchTimer = setTimeout(render, 200);
-    }
+    function scheduleRender() { clearTimeout(_searchTimer); _searchTimer = setTimeout(render, 200); }
 
     function render() {
       const q = query.toLowerCase();
-
       const filtered = [];
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const st = snapStatus(item.num);
         item.status = st;
-
-        if (status === 'review') {
-          if (!snapDueReview(item.num)) continue;
-        } else if (status !== 'all' && st !== status) continue;
-        if (family && !(item.tags || []).includes(family))   continue;
+        if (status === 'review') { if (!snapDueReview(item.num)) continue; }
+        else if (status !== 'all' && st !== status) continue;
+        if (family && !(item.tags || []).includes(family)) continue;
         if (q) {
-          if (!_nameLower.get(item.num).includes(q)
-            && !String(item.num).includes(q)
+          if (!_nameLower.get(item.num).includes(q) && !String(item.num).includes(q)
             && !_tagsLower.get(item.num).some(t => t.includes(q))) continue;
         }
         filtered.push(item);
@@ -1492,19 +1056,14 @@ function gsToPublicHttp(gsUrl) {
 
       if (sort === 'num')    filtered.sort((a, b) => a.num - b.num);
       if (sort === 'alpha')  filtered.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-      if (sort === 'family') filtered.sort((a, b) =>
-        (a.family || 'zzz').localeCompare(b.family || 'zzz', 'fr') || a.num - b.num
-      );
+      if (sort === 'family') filtered.sort((a, b) => (a.family||'zzz').localeCompare(b.family||'zzz','fr') || a.num - b.num);
       if (sort === 'chrono') {
-        // Ordre : en cours (récent→ancien) > fait (récent→ancien) > à faire (num↑)
         const rank = s => s === 'inprogress' ? 0 : s === 'done' ? 1 : 2;
         filtered.sort((a, b) => {
           const ra = rank(a.status), rb = rank(b.status);
           if (ra !== rb) return ra - rb;
-          if (ra === 2) return a.num - b.num; // à faire : ordre numérique
-          // en cours et fait : date décroissante (plus récent en premier)
-          const da = snapDoneDate(a.num);
-          const db = snapDoneDate(b.num);
+          if (ra === 2) return a.num - b.num;
+          const da = snapDoneDate(a.num), db = snapDoneDate(b.num);
           if (da && db) return db < da ? -1 : db > da ? 1 : 0;
           if (da) return -1;
           if (db) return 1;
@@ -1513,13 +1072,9 @@ function gsToPublicHttp(gsUrl) {
       }
 
       statsEl.textContent = `${filtered.length} / ${items.length}`;
-
-      // Sauvegarder l'ordre courant pour prev/next sur page SDD
       try {
         localStorage.setItem('uness_sdd_nav_order', JSON.stringify(filtered.map(i => i.num)));
-        localStorage.setItem('uness_sdd_nav_items', JSON.stringify(
-          items.map(i => ({ num: i.num, name: i.name, href: i.href }))
-        ));
+        localStorage.setItem('uness_sdd_nav_items', JSON.stringify(items.map(i => ({ num: i.num, name: i.name, href: i.href }))));
       } catch (_) {}
 
       if (!filtered.length) {
@@ -1527,10 +1082,8 @@ function gsToPublicHttp(gsUrl) {
         return;
       }
 
-      // Construire tous les nœuds dans un seul innerHTML sur un div wrapper
-      // évite 356x createElement + setAttribute
       let html = '';
-      const itemsRef = []; // référence pour les event handlers
+      const itemsRef = [];
       for (let i = 0; i < filtered.length; i++) {
         const item = filtered[i];
         const st   = item.status;
@@ -1541,15 +1094,13 @@ function gsToPublicHttp(gsUrl) {
         html +=
           `<a class="${cls}" href="${escapeHtml(item.href)}" data-i="${i}">` +
           _rowStableHTML.get(item.num) +
-          (snapDueReview(item.num) ? `<button class="row-review" data-rv="${item.num}" title="Marquer comme révisée · ${REVIEW_STEPS[Math.min((getReview(item.num)?.step||0), REVIEW_STEPS.length-1)]}j">🔔</button>` : '') +
+          (snapDueReview(item.num) ? `<button class="row-review" data-rv="${item.num}" title="Marquer comme révisée">🔔</button>` : '') +
           `<span class="row-ck${st === 'done' ? ' on' : ''}" title="${escapeHtml(tip)}">${st === 'done' ? '✓' : ''}</span>` +
           `<span class="row-arr">›</span></a>`;
       }
       list.innerHTML = html;
 
-      // Un seul listener délégué sur #list pour toutes les coches
       list.onclick = function(ev) {
-        // ── Clic badge révision ──
         if (ev.target.classList.contains('row-review') || ev.target.dataset.rv) {
           ev.preventDefault(); ev.stopPropagation();
           const btn = ev.target.closest('[data-rv]') || ev.target;
@@ -1557,14 +1108,12 @@ function gsToPublicHttp(gsUrl) {
           if (!n) return;
           commitReview(n);
           if (status === 'review') { render(); return; }
-          btn.remove(); // retire le badge in-place
+          btn.remove();
           return;
         }
-        // ── Clic checkbox ──
         if (!ev.target.classList.contains('row-ck')) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        const a    = ev.target.closest('a');
+        ev.preventDefault(); ev.stopPropagation();
+        const a = ev.target.closest('a');
         if (!a) return;
         const i    = parseInt(a.dataset.i, 10);
         const item = itemsRef[i];
@@ -1572,10 +1121,8 @@ function gsToPublicHttp(gsUrl) {
         const next = cur === 'done' ? 'todo' : 'done';
         commitStatus(item.num, next);
         item.status = next;
-
         if (status !== 'all') { render(); return; }
-
-        const ck  = ev.target;
+        const ck = ev.target;
         const newDd  = snapDoneDate(item.num);
         const newTip = newDd ? `Fait le ${formatDoneDate(newDd, true)}` : (next === 'done' ? 'Marquer comme à faire' : 'Marquer comme faite');
         ck.className  = next === 'done' ? 'row-ck on' : 'row-ck';
@@ -1585,12 +1132,10 @@ function gsToPublicHttp(gsUrl) {
       };
     }
 
-    // Events — search debounced, filters immédiats
     const statsEl = document.getElementById('stats');
     document.getElementById('search').addEventListener('input', e => { query = e.target.value; scheduleRender(); });
     document.getElementById('st').addEventListener('change', e => { status = e.target.value; render(); });
     if (hasFamilies) document.getElementById('ff').addEventListener('change', e => { family = e.target.value; render(); });
-
     ctrl.querySelectorAll('.sort-btns button').forEach(btn => {
       btn.addEventListener('click', () => {
         ctrl.querySelectorAll('.sort-btns button').forEach(b => b.classList.remove('on'));
@@ -1599,41 +1144,23 @@ function gsToPublicHttp(gsUrl) {
         render();
       });
     });
-
-    document.getElementById('btn-rf').addEventListener('click', () => {
-      GM_setValue(CACHE_TS, 0);
-      location.reload();
-    });
-
+    document.getElementById('btn-rf').addEventListener('click', () => { GM_setValue(CACHE_TS, 0); location.reload(); });
     document.getElementById('btn-logout')?.addEventListener('click', () => {
-      if (confirm('Se déconnecter du cloud sync ?\n\nUsername et PIN seront effacés localement. Tes données restent sur le cloud.')) {
-        window.cloudDisconnect();
-      }
+      if (confirm('Se déconnecter du cloud sync ?')) window.cloudDisconnect();
     });
-
     document.addEventListener('keydown', e => {
-      if (e.key === '/' && document.activeElement?.id !== 'search') {
-        e.preventDefault();
-        document.getElementById('search').focus();
-      }
+      if (e.key === '/' && document.activeElement?.id !== 'search') { e.preventDefault(); document.getElementById('search').focus(); }
     });
 
-    // ── Stats Modal ──────────────────────────────────────────────────────────
     function buildStatsModal() {
-      // Calculs
       const total = items.length;
       const doneItems = items.filter(i => snapStatus(i.num) === 'done');
       const inpItems  = items.filter(i => snapStatus(i.num) === 'inprogress');
       const doneCount = doneItems.length;
       const inpCount  = inpItems.length;
       const reviewDue = items.filter(i => snapDueReview(i.num)).length;
-
-      // Streak : jours consécutifs avec au moins une SDD faite
       const dayMap = new Set();
-      for (const item of doneItems) {
-        const d = snapDoneDate(item.num);
-        if (d) dayMap.add(new Date(d).toDateString());
-      }
+      for (const item of doneItems) { const d = snapDoneDate(item.num); if (d) dayMap.add(new Date(d).toDateString()); }
       let streak = 0;
       const today = new Date();
       for (let d = 0; d < 365; d++) {
@@ -1641,8 +1168,6 @@ function gsToPublicHttp(gsUrl) {
         if (dayMap.has(day.toDateString())) streak++;
         else if (d > 0) break;
       }
-
-      // Barres par spécialité
       const specMap = {};
       for (const item of items) {
         for (const tag of (item.tags || [])) {
@@ -1651,40 +1176,19 @@ function gsToPublicHttp(gsUrl) {
           if (snapStatus(item.num) === 'done') specMap[tag].done++;
         }
       }
-      const specs = Object.entries(specMap)
-        .sort((a, b) => b[1].done / b[1].total - a[1].done / a[1].total || b[1].total - a[1].total);
-
-      // Heatmap : 52 semaines × 7 jours
+      const specs = Object.entries(specMap).sort((a, b) => b[1].done / b[1].total - a[1].done / a[1].total || b[1].total - a[1].total);
       const heatDayMap = {};
-      for (const item of doneItems) {
-        const d = snapDoneDate(item.num);
-        if (!d) continue;
-        const key = new Date(d).toDateString();
-        heatDayMap[key] = (heatDayMap[key] || 0) + 1;
-      }
+      for (const item of doneItems) { const d = snapDoneDate(item.num); if (!d) continue; const key = new Date(d).toDateString(); heatDayMap[key] = (heatDayMap[key] || 0) + 1; }
       const maxPerDay = Math.max(...Object.values(heatDayMap), 1);
-
-      function heatLevel(n) {
-        if (!n) return '';
-        const r = n / maxPerDay;
-        return r < .25 ? 'l1' : r < .5 ? 'l2' : r < .75 ? 'l3' : 'l4';
-      }
-
-      // Build heatmap HTML (52 cols, 7 rows = 1 an)
-      let heatHTML = '<div class="heatmap-months">';
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - 7 * 51 - today.getDay());
-      const months = [];
-      let prevMonth = -1;
+      function heatLevel(n) { if (!n) return ''; const r = n / maxPerDay; return r < .25 ? 'l1' : r < .5 ? 'l2' : r < .75 ? 'l3' : 'l4'; }
+      const weekStart = new Date(today); weekStart.setDate(today.getDate() - 7 * 51 - today.getDay());
+      const months = []; let prevMonth = -1;
       for (let w = 0; w < 52; w++) {
         const d = new Date(weekStart); d.setDate(weekStart.getDate() + w * 7);
         const m = d.getMonth();
-        if (m !== prevMonth) {
-          months.push({ w, label: d.toLocaleDateString('fr-FR', { month: 'short' }) });
-          prevMonth = m;
-        }
+        if (m !== prevMonth) { months.push({ w, label: d.toLocaleDateString('fr-FR', { month: 'short' }) }); prevMonth = m; }
       }
-      // Month labels as flex items with approximate widths
+      let heatHTML = '<div class="heatmap-months">';
       for (let w = 0; w < 52; w++) {
         const mo = months.find(m => m.w === w);
         heatHTML += `<span style="width:13px;flex-shrink:0">${mo ? mo.label.slice(0,3) : ''}</span>`;
@@ -1695,85 +1199,38 @@ function gsToPublicHttp(gsUrl) {
         for (let d2 = 0; d2 < 7; d2++) {
           const day = new Date(weekStart); day.setDate(weekStart.getDate() + w * 7 + d2);
           if (day > today) { heatHTML += '<div class="heatmap-cell"></div>'; continue; }
-          const key = day.toDateString();
-          const n2 = heatDayMap[key] || 0;
-          const lvl = heatLevel(n2);
+          const n2 = heatDayMap[day.toDateString()] || 0;
           const label = day.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (n2 ? ` · ${n2} SDD` : '');
-          heatHTML += `<div class="heatmap-cell${lvl ? ' ' + lvl : ''}" title="${label}"></div>`;
+          heatHTML += `<div class="heatmap-cell${heatLevel(n2) ? ' ' + heatLevel(n2) : ''}" title="${label}"></div>`;
         }
         heatHTML += '</div>';
       }
       heatHTML += '</div>';
-
-      // Barres spécialités HTML
       let barsHTML = '';
       for (const [name, { total: tot, done: dn }] of specs) {
         const pct = Math.round(dn / tot * 100);
-        barsHTML += `
-          <div class="spec-bar-row">
-            <div class="spec-bar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-            <div class="spec-bar-track"><div class="spec-bar-fill" style="width:${pct}%"></div></div>
-            <div class="spec-bar-count">${dn}/${tot}</div>
-          </div>`;
+        barsHTML += `<div class="spec-bar-row"><div class="spec-bar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div><div class="spec-bar-track"><div class="spec-bar-fill" style="width:${pct}%"></div></div><div class="spec-bar-count">${dn}/${tot}</div></div>`;
       }
 
-      // DOM
       const backdrop = document.createElement('div');
       backdrop.id = 'stats-backdrop';
       backdrop.innerHTML = `
         <div id="stats-panel">
-          <div id="stats-panel-head">
-            📊 Statistiques &amp; Progression
-            <button id="stats-close" title="Fermer">✕</button>
-          </div>
+          <div id="stats-panel-head">📊 Statistiques &amp; Progression<button id="stats-close" title="Fermer">✕</button></div>
           <div id="stats-panel-body">
             <div class="stats-counters">
-              <div class="stat-box">
-                <div class="stat-box-val" style="color:var(--success)">${doneCount}</div>
-                <div class="stat-box-lbl">Faites</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-box-val" style="color:#fb923c">${inpCount}</div>
-                <div class="stat-box-lbl">En cours</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-box-val" style="color:var(--muted)">${total - doneCount - inpCount}</div>
-                <div class="stat-box-lbl">À faire</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-box-val">${Math.round(doneCount / total * 100)}%</div>
-                <div class="stat-box-lbl">Progression</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-box-val" style="color:#d97706">${reviewDue}</div>
-                <div class="stat-box-lbl">À réviser</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-box-val" style="color:var(--ac)">${total}</div>
-                <div class="stat-box-lbl">Total SDD</div>
-              </div>
+              <div class="stat-box"><div class="stat-box-val" style="color:var(--success)">${doneCount}</div><div class="stat-box-lbl">Faites</div></div>
+              <div class="stat-box"><div class="stat-box-val" style="color:#fb923c">${inpCount}</div><div class="stat-box-lbl">En cours</div></div>
+              <div class="stat-box"><div class="stat-box-val" style="color:var(--muted)">${total - doneCount - inpCount}</div><div class="stat-box-lbl">À faire</div></div>
+              <div class="stat-box"><div class="stat-box-val">${Math.round(doneCount / total * 100)}%</div><div class="stat-box-lbl">Progression</div></div>
+              <div class="stat-box"><div class="stat-box-val" style="color:#d97706">${reviewDue}</div><div class="stat-box-lbl">À réviser</div></div>
+              <div class="stat-box"><div class="stat-box-val" style="color:var(--ac)">${total}</div><div class="stat-box-lbl">Total SDD</div></div>
             </div>
-
-            <div class="stats-streak">
-              <div class="streak-fire">🔥</div>
-              <div>
-                <div class="streak-val">${streak} jour${streak !== 1 ? 's' : ''}</div>
-                <div class="streak-lbl">Streak actuel</div>
-              </div>
-            </div>
-
-            <div>
-              <div class="stats-section-title">Heatmap — 12 derniers mois</div>
-              ${heatHTML}
-            </div>
-
-            <div>
-              <div class="stats-section-title">Progression par spécialité</div>
-              ${barsHTML}
-            </div>
+            <div class="stats-streak"><div class="streak-fire">🔥</div><div><div class="streak-val">${streak} jour${streak !== 1 ? 's' : ''}</div><div class="streak-lbl">Streak actuel</div></div></div>
+            <div><div class="stats-section-title">Heatmap — 12 derniers mois</div>${heatHTML}</div>
+            <div><div class="stats-section-title">Progression par spécialité</div>${barsHTML}</div>
           </div>
         </div>`;
-
       document.body.appendChild(backdrop);
       backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
       backdrop.querySelector('#stats-close').addEventListener('click', () => backdrop.remove());
@@ -1783,7 +1240,6 @@ function gsToPublicHttp(gsUrl) {
     }
 
     document.getElementById('btn-stats').addEventListener('click', buildStatsModal);
-
     render();
   }
 
@@ -1795,163 +1251,51 @@ function gsToPublicHttp(gsUrl) {
     style.textContent = `
       @import url('${googleFontLink(CFG.fontFamily, CFG.fontWeights)}');
       ${cssVarsRoot()}
-
       html{overflow-x:clip!important}
-      html,body{
-        background:var(--bg)!important;color:var(--text)!important;
-        font-family:var(--ff)!important;font-size:var(--fs-base)!important;
-        font-weight:var(--fw-base)!important;
-      }
-
-      #mw-navigation,.p-navbar.not-collapsible,#footer-icons,#footer-places,
-      #footer-info,#catlinks,.printfooter,#jump-to-nav,#siteSub,.contentHeader,
-      #p-tb,.mw-editsection,#mw-head,#mw-panel{display:none!important}
-
+      html,body{background:var(--bg)!important;color:var(--text)!important;font-family:var(--ff)!important;font-size:var(--fs-base)!important;font-weight:var(--fw-base)!important}
+      #mw-navigation,.p-navbar.not-collapsible,#footer-icons,#footer-places,#footer-info,#catlinks,.printfooter,#jump-to-nav,#siteSub,.contentHeader,#p-tb,.mw-editsection,#mw-head,#mw-panel{display:none!important}
       .flex-fill.container{max-width:100%!important;padding:0!important}
       .flex-fill.container>.row{flex-direction:column!important}
       .flex-fill.container>.row>.col{padding:0!important}
       #content{border:none!important;background:transparent!important;padding:0!important;margin:0!important;box-shadow:none!important}
       .bodyContent{padding:0!important}
-
-      /* ── Breadcrumb ── */
-      #sdd-bc{
-        background:var(--surface);border-bottom:1px solid var(--border);
-        padding:10px 40px;display:flex;align-items:center;gap:8px;
-        font-size:var(--fs-small);color:var(--muted);
-      }
+      #sdd-bc{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 40px;display:flex;align-items:center;gap:8px;font-size:var(--fs-small);color:var(--muted)}
       #sdd-bc a{color:var(--muted);text-decoration:none;font-weight:var(--fw-med);transition:color var(--transition)}
       #sdd-bc a:hover{color:var(--ac)}
       #sdd-bc .sep{color:var(--border2);user-select:none}
       #sdd-bc .bc-spacer{margin-left:auto}
-
-      /* ── Prev / Next ── */
-      .sdd-nav-btn{
-        display:inline-flex;align-items:center;gap:5px;
-        padding:5px 11px;border:1px solid var(--border);border-radius:var(--r-sm);
-        background:var(--surface2);color:var(--text2);
-        text-decoration:none;font-size:var(--fs-tiny);font-weight:var(--fw-semi);
-        transition:border-color var(--transition),color var(--transition);
-        white-space:nowrap;
-      }
+      .sdd-nav-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface2);color:var(--text2);text-decoration:none;font-size:var(--fs-tiny);font-weight:var(--fw-semi);transition:border-color var(--transition),color var(--transition);white-space:nowrap}
       .sdd-nav-btn:hover{border-color:var(--ac);color:var(--ac)}
       .sdd-nav-btn.disabled{opacity:.35;pointer-events:none}
-      #sdd-nav-pos{
-        font-size:var(--fs-tiny);color:var(--muted);
-        padding:0 6px;font-variant-numeric:tabular-nums;
-      }
-
-      /* ── Header SDD ── */
-      #sdd-top{
-        background:var(--surface);border-bottom:1px solid var(--border);
-        padding:22px 40px 24px;display:flex;align-items:flex-start;gap:18px;
-        box-shadow:0 1px 4px rgba(0,0,0,.06);
-      }
-      #sdd-top-pill{
-        font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.9px;text-transform:uppercase;
-        padding:6px 12px;border-radius:var(--r-sm);
-        background:var(--ac-light);color:var(--ac);
-        flex-shrink:0;margin-top:5px;
-      }
+      #sdd-nav-pos{font-size:var(--fs-tiny);color:var(--muted);padding:0 6px;font-variant-numeric:tabular-nums}
+      #sdd-top{background:var(--surface);border-bottom:1px solid var(--border);padding:22px 40px 24px;display:flex;align-items:flex-start;gap:18px;}
+      #sdd-top-pill{font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.9px;text-transform:uppercase;padding:6px 12px;border-radius:var(--r-sm);background:var(--ac-light);color:var(--ac);flex-shrink:0;margin-top:5px}
       #sdd-top-info{flex:1;min-width:0}
-      #sdd-top-title{
-        font-size:var(--fs-title);font-weight:var(--fw-heavy);
-        letter-spacing:-.5px;line-height:1.25;color:var(--text);
-      }
+      #sdd-top-title{font-size:var(--fs-title);font-weight:var(--fw-heavy);letter-spacing:-.5px;line-height:1.25;color:var(--text)}
       #sdd-top-family{font-size:var(--fs-small);color:var(--muted);margin-top:8px}
       #sdd-top-family a{color:var(--ac);text-decoration:none;font-weight:var(--fw-semi)}
-      #sdd-top-family a:hover{text-decoration:underline}
-      #sdd-top-back{
-        padding:10px 16px;background:var(--surface2);border:1px solid var(--border);
-        border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);
-        text-decoration:none;font-family:inherit;font-weight:var(--fw-med);
-        transition:all var(--transition);white-space:nowrap;align-self:flex-start;
-      }
+      #sdd-top-back{padding:10px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);text-decoration:none;font-family:inherit;font-weight:var(--fw-med);transition:all var(--transition);white-space:nowrap;align-self:flex-start}
       #sdd-top-back:hover{color:var(--text);border-color:var(--border2);background:#fff}
-
-      /* ── Layout 2 colonnes ── */
-      #sdd-body{
-        padding:24px clamp(${CFG.railsMin}px, 3vw, ${CFG.railsMax}px) 70px;
-        display:grid;
-        grid-template-columns:var(--notes-col) minmax(0,1fr);
-        gap:16px;align-items:start;
-      }
-      #sdd-follow{
-        position:sticky;
-        top:${CFG.stickyTop}px;
-        max-height:calc(100vh - ${CFG.stickyTop * 2}px);
-        overflow-y:auto;
-      }
-
-      /* ── Resize handle ── */
-      #notes-resize-handle{
-        position:absolute;top:0;right:-5px;width:10px;height:100%;
-        cursor:col-resize;z-index:10;
-        display:flex;align-items:center;justify-content:center;
-      }
-      #notes-resize-handle::after{
-        content:'';display:block;width:3px;height:40px;
-        border-radius:3px;background:var(--border2);
-        transition:background var(--transition);
-      }
-      #notes-resize-handle:hover::after,
-      #notes-resize-handle.dragging::after{background:var(--ac)}
-
-      /* ── Cards ── */
-      .sc{
-        background:var(--surface);border:1px solid var(--border);
-        border-radius:var(--r);
-        box-shadow:0 1px 3px rgba(0,0,0,.05);
-      }
-      .sc-head{
-        padding:12px 16px;border-bottom:1px solid var(--border);
-        display:flex;align-items:center;gap:10px;
-        font-size:var(--fs-tiny);font-weight:var(--fw-bold);
-        letter-spacing:.8px;text-transform:uppercase;color:var(--muted);
-        background:linear-gradient(to bottom,#fff,#fafcff);
-        cursor:pointer;user-select:none;
-        transition:background var(--transition);
-      }
-      .sc-head:hover{background:#f5f7ff}
+      #sdd-body{padding:24px clamp(${CFG.railsMin}px,3vw,${CFG.railsMax}px) 70px;display:grid;grid-template-columns:var(--notes-col) minmax(0,1fr);gap:16px;align-items:start}
+      #sdd-follow{position:sticky;top:${CFG.stickyTop}px;max-height:calc(100vh - ${CFG.stickyTop * 2}px);overflow-y:auto}
+      #notes-resize-handle{position:absolute;top:0;right:-5px;width:10px;height:100%;cursor:col-resize;z-index:10;display:flex;align-items:center;justify-content:center}
+      #notes-resize-handle::after{content:'';display:block;width:3px;height:40px;border-radius:3px;background:var(--border2);transition:background var(--transition)}
+      #notes-resize-handle:hover::after,#notes-resize-handle.dragging::after{background:var(--ac)}
+      .sc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r)}
+      .sc-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.8px;text-transform:uppercase;color:var(--muted);background:var(--surface);cursor:pointer;user-select:none;transition:background var(--transition)}
+      .sc-head:hover{background:var(--surface2)}
       .sc-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
       .sc-body{padding:18px;min-width:0}
-      .sc-toggle{
-        margin-left:auto;font-size:15px;color:var(--muted);
-        transition:transform var(--transition);
-      }
-      .sc-head-date{
-        font-size:10px;font-weight:var(--fw-med);
-        color:var(--success);letter-spacing:.3px;
-        background:var(--success-light);
-        padding:2px 7px;border-radius:999px;
-        margin-left:4px;
-        text-transform:none;
-      }
+      .sc-toggle{margin-left:auto;font-size:15px;color:var(--muted);transition:transform var(--transition)}
+      .sc-head-date{font-size:10px;font-weight:var(--fw-med);color:var(--success);letter-spacing:.3px;background:var(--success-light);padding:2px 7px;border-radius:999px;margin-left:4px;text-transform:none}
       .sc.collapsed .sc-toggle{transform:rotate(-90deg)}
       .sc.collapsed .sc-body{display:none}
-
-      /* Chips */
       .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-      .chip{
-        display:inline-block;padding:7px 13px;border-radius:999px;
-        font-size:var(--fs-chip);font-weight:var(--fw-med);
-        text-decoration:none;
-        transition:opacity var(--transition),transform var(--transition),box-shadow var(--transition);
-      }
-      .chip:hover{opacity:.85;transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.1)}
-      .chip-section{
-        font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.6px;
-        text-transform:uppercase;padding:4px 10px;
-        display:inline-block;border-radius:var(--r-sm);margin-bottom:6px;
-      }
-
-      /* Table */
+      .chip{display:inline-block;padding:7px 13px;border-radius:999px;font-size:var(--fs-chip);font-weight:var(--fw-med);text-decoration:none;transition:opacity var(--transition),transform var(--transition),box-shadow var(--transition)}
+      .chip:hover{opacity:.8}
+      .chip-section{font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.6px;text-transform:uppercase;padding:4px 10px;display:inline-block;border-radius:var(--r-sm);margin-bottom:6px}
       .at{width:100%;border-collapse:collapse}
-      .at thead th{
-        padding:10px 12px;text-align:left;
-        font-size:var(--fs-tiny);font-weight:var(--fw-bold);
-        text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
-        background:var(--surface2);border-bottom:1px solid var(--border);
-      }
+      .at thead th{padding:10px 12px;text-align:left;font-size:var(--fs-tiny);font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.6px;color:var(--muted);background:var(--surface2);border-bottom:1px solid var(--border)}
       .at tbody tr{border-bottom:1px solid var(--border);transition:background var(--transition)}
       .at tbody tr:last-child{border-bottom:none}
       .at tbody tr:hover{background:var(--surface2)}
@@ -1961,205 +1305,122 @@ function gsToPublicHttp(gsUrl) {
       .tag{display:inline-block;padding:3px 8px;margin:2px;border-radius:6px;font-size:var(--fs-tiny);font-weight:var(--fw-semi)}
       .tag-d{background:#eff6ff;color:#1d4ed8}
       .tag-c{background:#f0fdf4;color:#15803d}
-
-      /* ── Bouton IA par attendu ── */
-      .att-ai-btn{
-        display:inline;margin-left:6px;padding:0 4px;
-        border:none;border-radius:4px;
-        background:none;color:var(--border2);
-        font-size:11px;line-height:1;
-        cursor:pointer;font-family:inherit;
-        transition:color var(--transition),opacity var(--transition);
-        vertical-align:middle;opacity:0;
-      }
+      .att-ai-btn{display:inline;margin-left:6px;padding:0 4px;border:none;border-radius:4px;background:none;color:var(--border2);font-size:11px;line-height:1;cursor:pointer;font-family:inherit;transition:color var(--transition),opacity var(--transition);vertical-align:middle;opacity:0}
       .at tbody tr:hover .att-ai-btn{opacity:1}
       .att-panel-row:hover{background:transparent!important}
       .att-ai-btn:hover{color:#4f46e5}
       .att-ai-btn.active{opacity:1;color:#4f46e5}
       .att-ai-btn.loading{opacity:.4;pointer-events:none}
-      .att-ai-panel{
-        display:block;margin-top:0;padding:12px 14px;
-        border-radius:var(--r-sm);border:1px solid #e0e7ff;
-        background:#f8f9ff;font-size:var(--fs-small);line-height:1.7;
-        color:var(--text2);
-      }
+      .att-ai-panel{display:block;margin-top:0;padding:12px 14px;border-radius:var(--r-sm);border:1px solid #e0e7ff;background:#f8f9ff;font-size:var(--fs-small);line-height:1.7;color:var(--text2)}
       .att-ai-panel.visible{display:block}
-      .att-ai-panel h2,.att-ai-panel h3{
-        font-size:var(--fs-small);font-weight:var(--fw-bold);
-        color:var(--ac);margin:12px 0 4px;
-      }
+      .att-ai-panel h2,.att-ai-panel h3{font-size:var(--fs-small);font-weight:var(--fw-bold);color:var(--ac);margin:12px 0 4px}
       .att-ai-panel ul{margin:4px 0 8px 16px;padding:0;list-style:disc}
       .att-ai-panel li{margin-bottom:3px}
       .att-ai-panel p{margin:4px 0}
       .att-ai-panel strong{font-weight:var(--fw-semi);color:var(--text)}
-      .att-ai-panel table{width:100%;border-collapse:collapse;margin:8px 0;font-size:var(--fs-tiny)}
-      .att-ai-panel th,.att-ai-panel td{padding:5px 8px;border:1px solid var(--border);text-align:left}
-      .att-ai-panel th{background:var(--surface2);font-weight:var(--fw-semi)}
-
-      /* ── Éditeur Markdown notes ── */
-      .md-toolbar{
-        display:none;gap:2px;padding:4px 6px;
-        border-bottom:1px solid var(--border);
-        background:#f8fafc;border-radius:var(--r-sm) var(--r-sm) 0 0;
-        align-items:center;
-      }
+      .md-toolbar{display:none;gap:2px;padding:4px 6px;border-bottom:1px solid var(--border);background:#f8fafc;border-radius:var(--r-sm) var(--r-sm) 0 0;align-items:center}
       .md-editor-wrap.editing .md-toolbar{display:flex}
-      .md-tb-btn{
-        padding:2px 7px;border:none;background:transparent;
-        border-radius:4px;cursor:pointer;font-family:inherit;
-        font-size:11px;color:var(--muted);line-height:1.6;
-        transition:background var(--transition),color var(--transition);
-      }
+      .md-tb-btn{padding:2px 7px;border:none;background:transparent;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;color:var(--muted);line-height:1.6;transition:background var(--transition),color var(--transition)}
       .md-tb-btn:hover{background:var(--border);color:var(--text)}
       .md-tb-sep{width:1px;background:var(--border2);margin:2px 3px;align-self:stretch}
-      .md-editor-wrap{
-        border:1px solid var(--border);border-radius:var(--r-sm);
-        background:#fafcff;
-        transition:border-color var(--transition);
-        cursor:text;
-      }
+      .md-editor-wrap{border:1px solid var(--border);border-radius:var(--r-sm);background:#fafcff;transition:border-color var(--transition);cursor:text}
       .md-editor-wrap:hover{border-color:var(--border2)}
-      .md-editor-wrap.editing{border-color:var(--ac);box-shadow:var(--sh-focus);cursor:auto}
-
-      /* Vue rendue */
-      .md-preview{
-        padding:10px 12px;min-height:50px;
-        font-size:12px;line-height:1.6;color:var(--text2);
-      }
-      .md-preview p{margin:.25em 0;line-height:1.65;font-size:12px}
-      .md-preview h1{font-size:14px;font-weight:800;margin:.3em 0 .1em;color:var(--text)}
-      .md-preview h2{font-size:13px;font-weight:700;margin:.25em 0 .1em;color:var(--text)}
-      .md-preview h3{font-size:12px;font-weight:700;margin:.2em 0 .05em;color:var(--ac)}
-      .md-preview h4,.md-preview h5,.md-preview h6{font-size:12px;font-weight:600;margin:.2em 0 .05em;color:var(--text)}
-      .md-preview ul,.md-preview ol{margin:.2em 0;padding:0 0 0 1.1em;font-size:12px}
-      .md-preview li{margin:0;padding:0;font-size:12px;line-height:1.55}
-      .md-preview strong{font-weight:700;color:var(--text)}
-      .md-preview em{font-style:italic}
-      .md-preview code{
-        font-family:ui-monospace,monospace;font-size:11px;
-        background:#f1f5f9;padding:1px 5px;border-radius:4px;
-        border:1px solid var(--border);
-      }
-      .md-preview a{color:var(--ac);text-decoration:none}
-      .md-preview a:hover{text-decoration:underline}
-      .md-preview blockquote{
-        border-left:3px solid var(--border2);margin:.2em 0;
-        padding:.1em .6em;color:var(--muted);font-style:italic;font-size:12px;
-      }
-      .md-preview hr{border:none;border-top:1px solid var(--border);margin:.3em 0}
-      .md-preview:empty::before{
-        content:'Notes… (cliquez pour éditer)';
-        color:var(--muted);font-style:italic;font-size:12px;pointer-events:none;
-      }
-
-
-      /* Textarea Markdown brut */
-      .md-textarea{
-        display:none;width:100%;box-sizing:border-box;
-        padding:10px 12px;border:none;outline:none;
-        background:transparent;resize:vertical;
-        font-family:ui-monospace,monospace;font-size:12px;
-        line-height:1.6;color:var(--text2);
-        min-height:180px;max-height:55vh;
-      }
+      .md-editor-wrap.editing{border-color:var(--ac);cursor:auto}
+      .md-preview{padding:10px 12px;min-height:50px;font-size:12px;line-height:1.6;color:var(--text2)}
+      .md-preview:empty::before{content:'Notes… (cliquez pour éditer)';color:var(--muted);font-style:italic;font-size:12px;pointer-events:none}
+      .md-textarea{display:none;width:100%;box-sizing:border-box;padding:10px 12px;border:none;outline:none;background:transparent;resize:vertical;font-family:ui-monospace,monospace;font-size:12px;line-height:1.6;color:var(--text2);min-height:180px;max-height:55vh}
       .md-editor-wrap.editing .md-preview{display:none}
       .md-editor-wrap.editing .md-textarea{display:block}
-
-      /* Statut sauvegarde */
-      #wy-save-status{
-        font-size:10px;color:var(--muted);padding:2px 8px 3px;
-        text-align:right;min-height:16px;
-      }
-
-      /* ── Sélecteur 3 états (page SDD) ── */
-      .status-picker{
-        display:flex;gap:0;margin-bottom:14px;
-        border:1px solid var(--border);border-radius:var(--r-sm);
-        overflow:hidden;
-      }
-      .status-btn{
-        flex:1;padding:9px 6px;
-        border:none;border-right:1px solid var(--border);
-        background:#fff;
-        font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);
-        cursor:pointer;color:var(--muted);
-        transition:background var(--transition),color var(--transition);
-        display:flex;align-items:center;justify-content:center;gap:5px;
-        white-space:nowrap;
-      }
+      #wy-save-status{font-size:10px;color:var(--muted);padding:2px 8px 3px;text-align:right;min-height:16px}
+      .status-picker{display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+      .status-btn{flex:1;padding:9px 6px;border:none;border-right:1px solid var(--border);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;color:var(--muted);transition:background var(--transition),color var(--transition);display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap}
       .status-btn:last-child{border-right:none}
       .status-btn:hover{background:var(--surface2);color:var(--text)}
-
       .status-btn.active-todo{background:var(--surface2);color:var(--text2)}
       .status-btn.active-inprogress{background:var(--inprogress-light);color:var(--inprogress);font-weight:var(--fw-bold)}
       .status-btn.active-done{background:var(--success-light);color:var(--success);font-weight:var(--fw-bold)}
-
-      /* ── Bouton logout ── */
       ${LOGOUT_BTN_CSS}
 
-      /* ── Card ECOS stations ── */
+      /* ── Card ECOS ── */
       .ecos-list{display:flex;flex-direction:column;gap:7px}
-      .ecos-item{
-        display:flex;align-items:center;gap:10px;
-        padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);
-        background:var(--surface2);
-      }
-      .ecos-icon{
-        font-size:18px;flex-shrink:0;line-height:1;
-      }
+      .ecos-item{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)}
+      .ecos-icon{font-size:18px;flex-shrink:0;line-height:1}
       .ecos-info{flex:1;min-width:0}
-      .ecos-name{
-        font-size:12px;font-weight:var(--fw-semi);color:var(--text2);
-        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-      }
+      .ecos-name{font-size:12px;font-weight:var(--fw-semi);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .ecos-meta{font-size:10px;color:var(--muted);margin-top:1px}
       .ecos-actions{display:flex;gap:5px;flex-shrink:0}
-      .ecos-btn{
-        padding:4px 9px;border-radius:var(--r-sm);border:1px solid var(--border);
-        background:#fff;color:var(--text2);font-size:11px;font-weight:var(--fw-semi);
-        font-family:inherit;cursor:pointer;text-decoration:none;
-        display:inline-flex;align-items:center;gap:3px;
-        transition:border-color var(--transition),color var(--transition);
-      }
+      .ecos-btn{padding:4px 9px;border-radius:var(--r-sm);border:1px solid var(--border);background:#fff;color:var(--text2);font-size:11px;font-weight:var(--fw-semi);font-family:inherit;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:3px;transition:border-color var(--transition),color var(--transition)}
       .ecos-btn:hover{border-color:var(--ac);color:var(--ac)}
       .ecos-btn.primary{background:var(--ac);border-color:var(--ac);color:#fff}
       .ecos-btn.primary:hover{background:var(--ac-dark);border-color:var(--ac-dark)}
+      .ecos-btn.danger{background:var(--danger-light);border-color:#fca5a5;color:var(--danger)}
+      .ecos-btn.danger:hover{background:#fee2e2;border-color:var(--danger)}
 
-      /* Preview PDF plein écran */
-      #ecos-preview-backdrop{
-        position:fixed;inset:0;background:rgba(15,23,42,.7);
-        z-index:1000;display:flex;align-items:center;justify-content:center;
-        padding:20px;
+      /* ── Upload ECOS (discret) ── */
+      #ecos-upload-input{display:none}
+      #ecos-upload-toggle{
+        display:inline-flex;align-items:center;gap:5px;
+        margin-top:10px;padding:4px 10px;
+        border:1px dashed var(--border2);border-radius:var(--r-sm);
+        background:transparent;color:var(--muted);
+        font-size:var(--fs-tiny);font-family:inherit;font-weight:var(--fw-med);
+        cursor:pointer;transition:all var(--transition);
       }
-      #ecos-preview-panel{
-        width:min(900px,95vw);height:90vh;
-        background:#fff;border-radius:var(--r);overflow:hidden;
-        display:flex;flex-direction:column;box-shadow:var(--sh2);
+      #ecos-upload-toggle:hover{color:var(--ac);border-color:var(--ac);background:var(--ac-light)}
+      #ecos-upload-panel{
+        margin-top:8px;padding:10px 12px;
+        border:1px solid var(--border);border-radius:var(--r-sm);
+        background:var(--surface2);
       }
-      #ecos-preview-head{
-        padding:10px 16px;border-bottom:1px solid var(--border);
-        display:flex;align-items:center;gap:10px;font-size:var(--fs-small);
-        font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff;
+      .ecos-drop-zone{
+        border:1px dashed var(--border2);border-radius:var(--r-sm);
+        padding:10px;text-align:center;cursor:pointer;
+        font-size:var(--fs-tiny);color:var(--muted);
+        transition:border-color var(--transition),background var(--transition);
       }
-      #ecos-preview-head a{
-        margin-left:auto;font-size:var(--fs-tiny);color:var(--ac);font-weight:var(--fw-semi);
+      .ecos-drop-zone:hover,.ecos-drop-zone.drag-over{
+        border-color:var(--ac);color:var(--ac);background:var(--ac-light);
       }
-      #ecos-preview-head button{
-        background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted);
-        padding:2px 6px;border-radius:4px;
+      .ecos-upload-progress{margin-top:8px;display:flex;flex-direction:column;gap:5px}
+      .ecos-upload-item{display:flex;align-items:center;gap:6px;font-size:var(--fs-tiny);color:var(--text2)}
+      .ecos-upload-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .ecos-upload-bar-wrap{width:60px;height:3px;background:var(--border);border-radius:999px;overflow:hidden;flex-shrink:0}
+      .ecos-upload-bar{height:100%;border-radius:999px;background:var(--ac);transition:width .2s ease;width:0%}
+      .ecos-upload-status{font-size:10px;flex-shrink:0;min-width:24px;text-align:right}
+      .ecos-upload-status.done{color:var(--success)}
+      .ecos-upload-status.error{color:var(--danger)}
+      .ecos-upload-fields{display:flex;gap:6px;margin-top:8px}
+      .ecos-upload-fields input{
+        flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);
+        font-size:var(--fs-tiny);font-family:inherit;color:var(--text);background:#fff;outline:none;
+        transition:border-color var(--transition);
       }
+      .ecos-upload-fields input:focus{border-color:var(--ac)}
+      .ecos-upload-fields input::placeholder{color:var(--muted)}
+      .ecos-upload-actions{display:flex;gap:6px;margin-top:8px}
+      .ecos-upload-btn{
+        flex:1;padding:6px 10px;border-radius:var(--r-sm);border:none;
+        font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;transition:all var(--transition);
+      }
+      .ecos-upload-btn.submit{background:var(--ac);color:#fff}
+      .ecos-upload-btn.submit:hover{background:var(--ac-dark)}
+      .ecos-upload-btn.submit:disabled{opacity:.4;pointer-events:none}
+      .ecos-upload-btn.cancel{background:transparent;color:var(--muted);border:1px solid var(--border)}
+      .ecos-upload-btn.cancel:hover{color:var(--text);border-color:var(--border2)}
+
+      /* Preview PDF */
+      #ecos-preview-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+      #ecos-preview-panel{width:min(900px,95vw);height:90vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column;}
+      #ecos-preview-head{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:var(--fs-small);font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff}
+      #ecos-preview-head a{font-size:var(--fs-tiny);color:var(--ac);font-weight:var(--fw-semi)}
+      #ecos-preview-head button{background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted);padding:2px 6px;border-radius:4px}
       #ecos-preview-head button:hover{color:var(--text);background:var(--surface2)}
       #ecos-preview-iframe{flex:1;border:none;width:100%}
 
       @keyframes spin{to{transform:rotate(360deg)}}
-
-      /* ── Mobile ── */
       @media(max-width:${CFG.breakpointOneCol}px){
         #sdd-bc,#sdd-top{padding-left:14px;padding-right:14px}
-        #sdd-body{
-          grid-template-columns:1fr;
-          padding-left:14px;padding-right:14px;
-        }
+        #sdd-body{grid-template-columns:1fr;padding-left:14px;padding-right:14px}
         #sdd-follow{position:static;max-height:none;overflow-y:visible}
         #sdd-top{flex-wrap:wrap}
         #sdd-top-title{font-size:20px}
@@ -2177,13 +1438,9 @@ function gsToPublicHttp(gsUrl) {
       const tryBuild = () => {
         attempts++;
         const tables = document.querySelectorAll('.navbox table');
-        if (tables.length) {
-          buildSDD();
-        } else if (attempts < 50) {
-          setTimeout(tryBuild, 100);
-        } else {
-          buildSDD();
-        }
+        if (tables.length) buildSDD();
+        else if (attempts < 50) setTimeout(tryBuild, 100);
+        else buildSDD();
       };
       tryBuild();
     }
@@ -2193,155 +1450,274 @@ function gsToPublicHttp(gsUrl) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ECOS — chargement fichiers depuis Firestore + preview PDF
+  // ECOS — chargement fichiers depuis Firestore
+  // ══════════════════════════════════════════════════════════════════════════
+  async function loadEcosFiles(sddN) {
+    const tok = await cloudEnsureSession();
+    if (!tok) throw new Error('Non authentifié');
+
+    const url = `${firestoreBase()}/ecos/${sddN}/files`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${tok.idToken}` } });
+
+    if (r.status === 404) return [];
+    if (!r.ok) throw new Error(`Firestore ECOS HTTP ${r.status}`);
+
+    const json = await r.json().catch(() => ({}));
+    const docs = json.documents || [];
+
+    function getField(fields, k) {
+      const fv = fields?.[k];
+      if (!fv) return '';
+      return fv.stringValue ?? fv.integerValue ?? fv.doubleValue ?? '';
+    }
+
+    const out = await Promise.all(docs.map(async (doc) => {
+      const f = doc.fields || {};
+      let rawUrl = getField(f, 'url');
+      rawUrl = normalizeToFirebaseEndpoint(rawUrl);
+      if (rawUrl && rawUrl.startsWith('gs://')) {
+        rawUrl = await resolvePublicEcosUrl(rawUrl);
+      }
+      return {
+        id:         doc.name?.split('/').pop() || '',
+        name:       getField(f, 'name'),
+        url:        rawUrl,
+        source:     getField(f, 'source'),
+        specialite: getField(f, 'specialite'),
+        sizeBytes:  parseInt(f.sizeBytes?.integerValue || '0', 10),
+        uploadedBy: getField(f, 'uploadedBy'),
+        uploadedAt: getField(f, 'uploadedAt'),
+        storagePath:getField(f, 'storagePath'),
+      };
+    }));
+
+    return out.filter(d => d.name && d.url && /^https?:\/\//i.test(d.url));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ECOS — Upload vers Firebase Storage + enregistrement Firestore
   // ══════════════════════════════════════════════════════════════════════════
 
-async function loadEcosFiles(sddN) {
-  const tok = await cloudEnsureSession();
-  if (!tok) throw new Error('Non authentifié');
+  /**
+   * Upload un fichier dans Firebase Storage via l'API REST resumable.
+   * Retourne l'URL gs:// et l'URL publique.
+   */
+  async function uploadEcosFile(file, sddN, onProgress) {
+    const tok = await cloudEnsureSession();
+    if (!tok) throw new Error('Non authentifié');
 
-  const url = `${firestoreBase()}/ecos/${sddN}/files`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${tok.idToken}` } });
+    const { storageBucket } = CFG.ecos;
+    const ext       = file.name.split('.').pop().toLowerCase();
+    const timestamp = Date.now();
+    const safeUid   = (tok.uid || 'anon').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const storagePath = `ecos/${sddN}/${timestamp}_${safeUid}.${ext}`;
 
-  if (r.status === 404) return [];
-  if (!r.ok) {
-    const txt = await r.text().catch(() => '');
-    throw new Error(`Firestore ECOS HTTP ${r.status}${txt ? ': ' + txt.slice(0, 200) : ''}`);
-  }
+    // 1. Initier upload resumable
+    const initUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o?uploadType=resumable&name=${encodeURIComponent(storagePath)}`;
+    const initRes = await fetch(initUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization':   `Bearer ${tok.idToken}`,
+        'Content-Type':    'application/json',
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Type': file.type || 'application/octet-stream',
+        'X-Goog-Upload-Header-Content-Length': String(file.size),
+      },
+      body: JSON.stringify({
+        name: storagePath,
+        contentType: file.type || 'application/octet-stream',
+      }),
+    });
 
-  const json = await r.json().catch(() => ({}));
-  const docs = json.documents || [];
-
-  function getField(fields, k) {
-    const fv = fields?.[k];
-    if (!fv) return '';
-    return fv.stringValue ?? fv.integerValue ?? fv.doubleValue ?? '';
-  }
-
-  const out = await Promise.all(docs.map(async (doc) => {
-    const f = doc.fields || {};
-
-let rawUrl = getField(f, 'url');
-rawUrl = normalizeToFirebaseEndpoint(rawUrl);
-
-    if (rawUrl && rawUrl.startsWith('gs://')) {
-      const resolved = await resolvePublicEcosUrl(rawUrl);
-      // utile pour debug :
-      // console.log('[ECOS] resolved', rawUrl, '->', resolved);
-      rawUrl = resolved;
+    if (!initRes.ok) {
+      const txt = await initRes.text().catch(() => '');
+      throw new Error(`Storage init HTTP ${initRes.status}: ${txt.slice(0, 200)}`);
     }
 
-    return {
-      name:       getField(f, 'name'),
-      url:        rawUrl,
-      source:     getField(f, 'source'),
-      specialite: getField(f, 'specialite'),
-      sizeBytes:  parseInt(f.sizeBytes?.integerValue || '0', 10),
+    // Certains serveurs Firebase retournent l'upload URL dans un header
+    let uploadUrl = initRes.headers.get('X-Goog-Upload-URL') || initRes.headers.get('Location');
+
+    // Si pas de resumable URL, fallback sur multipart simple
+    if (!uploadUrl) {
+      return await uploadEcosFileMultipart(file, sddN, storagePath, tok, onProgress);
+    }
+
+    // 2. Upload du contenu (chunks avec progression)
+    const CHUNK = 256 * 1024; // 256 KB
+    let offset = 0;
+    let downloadUrl = '';
+
+    while (offset < file.size) {
+      const end   = Math.min(offset + CHUNK, file.size);
+      const chunk = file.slice(offset, end);
+      const isLast = end >= file.size;
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type':  file.type || 'application/octet-stream',
+          'X-Goog-Upload-Command':  isLast ? 'upload, finalize' : 'upload',
+          'X-Goog-Upload-Offset':   String(offset),
+          'Content-Length':         String(chunk.size),
+        },
+        body: chunk,
+      });
+
+      offset = end;
+      if (onProgress) onProgress(Math.round(offset / file.size * 100));
+
+      if (isLast) {
+        if (!uploadRes.ok) {
+          const txt = await uploadRes.text().catch(() => '');
+          throw new Error(`Storage upload HTTP ${uploadRes.status}: ${txt.slice(0, 200)}`);
+        }
+        const uploadJson = await uploadRes.json().catch(() => ({}));
+        downloadUrl = uploadJson.downloadTokens
+          ? `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o/${encodeURIComponent(storagePath)}?alt=media&token=${uploadJson.downloadTokens}`
+          : makePublicHttpUrl(storageBucket, storagePath);
+      }
+    }
+
+    return { storagePath, downloadUrl, gsUrl: `gs://${storageBucket}/${storagePath}` };
+  }
+
+  /** Fallback: upload multipart simple */
+  async function uploadEcosFileMultipart(file, sddN, storagePath, tok, onProgress) {
+    const { storageBucket } = CFG.ecos;
+
+    // Lire le fichier en ArrayBuffer
+    const buffer = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Lecture du fichier échouée'));
+      reader.readAsArrayBuffer(file);
+    });
+
+    if (onProgress) onProgress(50);
+
+    const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o?name=${encodeURIComponent(storagePath)}&uploadType=media`;
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tok.idToken}`,
+        'Content-Type':  file.type || 'application/octet-stream',
+      },
+      body: buffer,
+    });
+
+    if (!uploadRes.ok) {
+      const txt = await uploadRes.text().catch(() => '');
+      throw new Error(`Storage multipart HTTP ${uploadRes.status}: ${txt.slice(0, 200)}`);
+    }
+
+    const uploadJson = await uploadRes.json().catch(() => ({}));
+    if (onProgress) onProgress(100);
+
+    const downloadUrl = uploadJson.downloadTokens
+      ? `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o/${encodeURIComponent(storagePath)}?alt=media&token=${uploadJson.downloadTokens}`
+      : makePublicHttpUrl(storageBucket, storagePath);
+
+    return { storagePath, downloadUrl, gsUrl: `gs://${storageBucket}/${storagePath}` };
+  }
+
+  /** Enregistre les métadonnées dans Firestore sous /ecos/{sddN}/files/{docId} */
+  async function saveEcosFileMeta(sddN, meta) {
+    const tok = await cloudEnsureSession();
+    if (!tok) throw new Error('Non authentifié');
+
+    const docId = `file_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const url   = `${firestoreBase()}/ecos/${sddN}/files/${docId}`;
+
+    const fields = {
+      name:        { stringValue:  meta.name        || '' },
+      url:         { stringValue:  meta.downloadUrl  || '' },
+      storagePath: { stringValue:  meta.storagePath  || '' },
+      gsUrl:       { stringValue:  meta.gsUrl        || '' },
+      source:      { stringValue:  meta.source       || '' },
+      specialite:  { stringValue:  meta.specialite   || '' },
+      sizeBytes:   { integerValue: String(meta.sizeBytes || 0) },
+      mimeType:    { stringValue:  meta.mimeType     || '' },
+      uploadedBy:  { stringValue:  tok.uid           || '' },
+      uploadedAt:  { integerValue: String(Date.now()) },
     };
-  }));
 
-  return out.filter(d => d.name && d.url && /^https?:\/\//i.test(d.url));
-}
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok.idToken}` },
+      body: JSON.stringify({ fields }),
+    });
 
-function openEcosPreview(file) {
-  // ─────────────────────────────────────────────────────────────────────────
-  // Helpers : force toujours l’endpoint Firebase (pas storage.googleapis.com)
-  // ─────────────────────────────────────────────────────────────────────────
-  function normalizeToFirebaseEndpoint(u) {
-    const s = String(u || '').trim();
-
-    // gs://bucket/path -> firebasestorage
-    let m = s.match(/^gs:\/\/([^/]+)\/(.+)$/);
-    if (m) {
-      const bucket = m[1], path = m[2];
-      return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      throw new Error(`Firestore save HTTP ${r.status}: ${txt.slice(0, 200)}`);
     }
-
-    // https://storage.googleapis.com/bucket/path -> firebasestorage
-    m = s.match(/^https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/);
-    if (m) {
-      const bucket = m[1], path = m[2];
-      return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
-    }
-
-    // déjà bon (ou autre) : on ne touche pas
-    return s;
+    return docId;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // UI
-  // ─────────────────────────────────────────────────────────────────────────
-  const existing = document.getElementById('ecos-preview-backdrop');
-  if (existing) existing.remove();
+  /** Supprime un document Firestore (et optionnellement le fichier Storage) */
+  async function deleteEcosFile(sddN, fileId, storagePath) {
+    const tok = await cloudEnsureSession();
+    if (!tok) throw new Error('Non authentifié');
 
-  // Normalise URL (évite IAM AccessDenied côté storage.googleapis.com)
-  const safeUrl = normalizeToFirebaseEndpoint(file?.url);
+    // Supprimer Firestore
+    const fsUrl = `${firestoreBase()}/ecos/${sddN}/files/${fileId}`;
+    const fsRes = await fetch(fsUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${tok.idToken}` } });
+    if (!fsRes.ok && fsRes.status !== 404) throw new Error(`Firestore delete HTTP ${fsRes.status}`);
 
-  // Taille
-  const sizeMB = (file?.sizeBytes > 0)
-    ? ` · ${(file.sizeBytes / 1048576).toFixed(1)} Mo`
-    : '';
+    // Supprimer Storage si path connu
+    if (storagePath) {
+      const { storageBucket } = CFG.ecos;
+      const storageUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o/${encodeURIComponent(storagePath)}`;
+      try {
+        await fetch(storageUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${tok.idToken}` } });
+      } catch (_) {}
+    }
+  }
 
-  // Preview direct PDF (pas Google Docs Viewer)
-  // -> évite que Google refasse un fetch via storage.googleapis.com (IAM)
-  const iframeUrl = safeUrl;
+  // ══════════════════════════════════════════════════════════════════════════
+  // ECOS — Preview PDF
+  // ══════════════════════════════════════════════════════════════════════════
+  function openEcosPreview(file) {
+    const existing = document.getElementById('ecos-preview-backdrop');
+    if (existing) existing.remove();
 
-  const backdrop = document.createElement('div');
-  backdrop.id = 'ecos-preview-backdrop';
+    const safeUrl = normalizeToFirebaseEndpoint(file?.url);
+    const sizeMB  = (file?.sizeBytes > 0) ? ` · ${(file.sizeBytes / 1048576).toFixed(1)} Mo` : '';
 
-  backdrop.innerHTML = `
-    <div id="ecos-preview-panel">
-      <div id="ecos-preview-head">
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          📄 ${escapeHtml(file?.name || 'Document')}${escapeHtml(sizeMB)}
-        </span>
+    const backdrop = document.createElement('div');
+    backdrop.id = 'ecos-preview-backdrop';
+    backdrop.innerHTML = `
+      <div id="ecos-preview-panel">
+        <div id="ecos-preview-head">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            📄 ${escapeHtml(file?.name || 'Document')}${escapeHtml(sizeMB)}
+          </span>
+          <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="margin:0 8px">↗ Ouvrir</a>
+          <a href="${escapeHtml(safeUrl)}" download="${escapeHtml(file?.name || 'document.pdf')}" style="margin-right:8px">⬇ Télécharger</a>
+          <button id="ecos-preview-close" title="Fermer (Echap)">✕</button>
+        </div>
+        <iframe id="ecos-preview-iframe" src="${escapeHtml(safeUrl)}" title="${escapeHtml(file?.name || 'Document')}" allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+      </div>`;
+    document.body.appendChild(backdrop);
 
-        <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer"
-           style="font-size:11px;color:var(--ac);white-space:nowrap;margin:0 8px">
-          ↗ Ouvrir dans un onglet
-        </a>
+    const close = () => backdrop.remove();
+    backdrop.querySelector('#ecos-preview-close').addEventListener('click', close);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+  }
 
-        <a href="${escapeHtml(safeUrl)}" download="${escapeHtml(file?.name || 'document.pdf')}"
-           style="font-size:11px;color:var(--ac);white-space:nowrap;margin-right:8px">
-          ⬇ Télécharger
-        </a>
-
-        <button id="ecos-preview-close" title="Fermer (Echap)">✕</button>
-      </div>
-
-      <iframe id="ecos-preview-iframe"
-        src="${escapeHtml(iframeUrl)}"
-        title="${escapeHtml(file?.name || 'Document')}"
-        allow="fullscreen"
-        referrerpolicy="no-referrer">
-      </iframe>
-    </div>`;
-
-  document.body.appendChild(backdrop);
-
-  const close = () => backdrop.remove();
-  backdrop.querySelector('#ecos-preview-close').addEventListener('click', close);
-  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-
-  const onKey = (e) => {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
-  };
-  document.addEventListener('keydown', onKey);
-
-  // Debug utile (à laisser le temps de valider)
-  console.log('[ECOS] openEcosPreview:', {
-    name: file?.name,
-    originalUrl: file?.url,
-    normalizedUrl: safeUrl
-  });
-}
-
+  // ══════════════════════════════════════════════════════════════════════════
+  // ECOS — Build Card (liste + upload)
+  // ══════════════════════════════════════════════════════════════════════════
   async function buildEcosCard(sddN, sddName, follow) {
     const ecosCollapsed = isCollapsedKey(`sdd_${sddN}_ecos`);
 
     const ecosCard = document.createElement('div');
     ecosCard.className = `sc${ecosCollapsed ? ' collapsed' : ''}`;
     ecosCard.dataset.key = 'ecos';
+
     ecosCard.innerHTML = `
       <div class="sc-head">
         <div class="sc-dot" style="background:#dc2626"></div>
@@ -2355,64 +1731,252 @@ function openEcosPreview(file) {
     follow.appendChild(ecosCard);
 
     const body = ecosCard.querySelector('#ecos-body');
+    let _files = []; // liste en mémoire pour suppressions
 
-    function renderEcosFiles(files) {
+    // ── Rendu liste des fichiers ──────────────────────────────────────────
+    function renderFileList(files, currentUid) {
+      _files = files;
+      const listWrap = body.querySelector('#ecos-file-list') || (() => {
+        const d = document.createElement('div');
+        d.id = 'ecos-file-list';
+        return d;
+      })();
+      listWrap.innerHTML = '';
+
       if (!files.length) {
-        body.innerHTML = '<p style="color:var(--muted);font-size:12px;font-style:italic;margin:0">Aucune station ECOS disponible pour cette SDD.</p>';
-        return;
+        listWrap.innerHTML = '<p style="color:var(--muted);font-size:12px;font-style:italic;margin:0 0 4px">Aucune station ECOS disponible.</p>';
+      } else {
+        let html = '<div class="ecos-list">';
+        for (let fi = 0; fi < files.length; fi++) {
+          const f = files[fi];
+          const sizeMB = f.sizeBytes > 0 ? `${(f.sizeBytes / 1048576).toFixed(1)} Mo` : '';
+          const meta   = [f.source, f.specialite, sizeMB].filter(Boolean).join(' · ');
+          html += `
+            <div class="ecos-item" data-idx="${fi}">
+              <div class="ecos-icon">📄</div>
+              <div class="ecos-info">
+                <div class="ecos-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+                ${meta ? `<div class="ecos-meta">${escapeHtml(meta)}</div>` : ''}
+              </div>
+              <div class="ecos-actions">
+                <button class="ecos-btn" data-action="preview" data-idx="${fi}">Voir</button>
+                <a class="ecos-btn primary" href="${escapeHtml(f.url)}" download="${escapeHtml(f.name)}" target="_blank">⬇</a>
+                ${files[fi].uploadedBy === currentUid ? `<button class="ecos-btn danger" data-action="delete" data-idx="${fi}" title="Supprimer">✕</button>` : ''}
+              </div>
+            </div>`;
+        }
+        html += '</div>';
+        listWrap.innerHTML = html;
       }
 
-      let html = '<div class="ecos-list">';
-      for (const f of files) {
-        const sizeMB = f.sizeBytes > 0 ? `${(f.sizeBytes / 1048576).toFixed(1)} Mo` : '';
-        const meta   = [f.source, f.specialite, sizeMB].filter(Boolean).join(' · ');
-        html += `
-          <div class="ecos-item">
-            <div class="ecos-icon">📄</div>
-            <div class="ecos-info">
-              <div class="ecos-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
-              ${meta ? `<div class="ecos-meta">${escapeHtml(meta)}</div>` : ''}
-            </div>
-            <div class="ecos-actions">
-              <button class="ecos-btn" data-preview="${escapeHtml(JSON.stringify(f))}">Voir</button>
-              <a class="ecos-btn primary" href="${escapeHtml(f.url)}" download="${escapeHtml(f.name)}" target="_blank">⬇</a>
-            </div>
-          </div>`;
-      }
-      html += '</div>';
-      body.innerHTML = html;
-
-      // Preview click
-      body.addEventListener('click', e => {
-        const btn = e.target.closest('[data-preview]');
+      // Délégation événements sur la liste
+      listWrap.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-action]');
         if (!btn) return;
-        try { openEcosPreview(JSON.parse(btn.dataset.preview)); } catch (_) {}
+
+        const idx = parseInt(btn.dataset.idx, 10);
+        const f   = _files[idx];
+
+        if (btn.dataset.action === 'preview') {
+          if (f) openEcosPreview(f);
+        }
+
+        if (btn.dataset.action === 'delete') {
+          if (!f) return;
+          // Security: only allow deletion of own files (double-check client-side)
+          if (f.uploadedBy && currentUid && f.uploadedBy !== currentUid) {
+            alert('Vous ne pouvez supprimer que vos propres fichiers.');
+            return;
+          }
+          if (!confirm('Supprimer ce fichier ?')) return;
+          const fileId      = f.id;
+          const storagePath = f.storagePath;
+          btn.textContent = '…';
+          btn.disabled    = true;
+          try {
+            await deleteEcosFile(sddN, fileId, storagePath);
+            _files = _files.filter(f => f.id !== fileId);
+            renderFileList(_files, currentUid);
+          } catch (err) {
+            alert('Erreur suppression : ' + err.message);
+            btn.textContent = '✕';
+            btn.disabled    = false;
+          }
+        }
       });
+
+      return listWrap;
     }
 
-    // Chargement si non collapsed
+    // ── Zone d'upload (discrète) ──────────────────────────────────────────
+    function buildUploadZone(currentUid) {
+      const wrap = document.createElement('div');
+      wrap.id = 'ecos-upload-wrap';
+
+      wrap.innerHTML = `
+        <button id="ecos-upload-toggle">＋ Ajouter un fichier</button>
+        <div id="ecos-upload-panel" style="display:none">
+          <div class="ecos-drop-zone" id="ecos-drop-zone">Cliquer ou déposer — PDF, PNG, JPG (max ${CFG.ecos.maxFileSizeMB} Mo)</div>
+          <input type="file" id="ecos-upload-input" accept="${CFG.ecos.allowedExt.join(',')}" multiple>
+          <div class="ecos-upload-progress" id="ecos-upload-progress"></div>
+          <div class="ecos-upload-fields" id="ecos-upload-fields" style="display:none">
+            <input type="text" id="ecos-meta-source" placeholder="Source (LISA 2024…)">
+            <input type="text" id="ecos-meta-specialite" placeholder="Spécialité">
+          </div>
+          <div class="ecos-upload-actions" id="ecos-upload-actions" style="display:none">
+            <button class="ecos-upload-btn submit" id="ecos-upload-submit" disabled>⬆ Envoyer</button>
+            <button class="ecos-upload-btn cancel" id="ecos-upload-cancel">Annuler</button>
+          </div>
+        </div>`;
+
+      const toggle    = wrap.querySelector('#ecos-upload-toggle');
+      const panel     = wrap.querySelector('#ecos-upload-panel');
+      const dropZone  = wrap.querySelector('#ecos-drop-zone');
+      const input     = wrap.querySelector('#ecos-upload-input');
+      const progress  = wrap.querySelector('#ecos-upload-progress');
+      const fields    = wrap.querySelector('#ecos-upload-fields');
+      const actions   = wrap.querySelector('#ecos-upload-actions');
+      const submitBtn = wrap.querySelector('#ecos-upload-submit');
+      const cancelBtn = wrap.querySelector('#ecos-upload-cancel');
+
+      let _pendingFiles = [];
+      let _open = false;
+
+      toggle.addEventListener('click', () => {
+        _open = !_open;
+        panel.style.display = _open ? '' : 'none';
+        toggle.textContent  = _open ? '✕ Fermer' : '＋ Ajouter un fichier';
+      });
+
+      function resetUpload() {
+        _pendingFiles = [];
+        input.value   = '';
+        progress.innerHTML = '';
+        fields.style.display   = 'none';
+        actions.style.display  = 'none';
+        submitBtn.disabled     = true;
+      }
+
+      function validateAndShow(files) {
+        const { maxFileSizeMB, allowedTypes } = CFG.ecos;
+        const valid = [], errors = [];
+        for (const f of files) {
+          if (!allowedTypes.includes(f.type)) { errors.push(f.name + ' : type non supporté'); continue; }
+          if (f.size > maxFileSizeMB * 1024 * 1024) { errors.push(f.name + ' : trop lourd (max ' + maxFileSizeMB + ' Mo)'); continue; }
+          valid.push(f);
+        }
+        if (errors.length) alert('Fichiers rejetés :\n' + errors.join('\n'));
+        if (!valid.length) return;
+
+        _pendingFiles = valid;
+        progress.innerHTML = '';
+        for (const f of valid) {
+          const item = document.createElement('div');
+          item.className = 'ecos-upload-item';
+          item.dataset.fname = f.name;
+          item.innerHTML =
+            '<span class="ecos-upload-item-name" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>' +
+            '<div class="ecos-upload-bar-wrap"><div class="ecos-upload-bar"></div></div>' +
+            '<span class="ecos-upload-status">En attente</span>';
+          progress.appendChild(item);
+        }
+        fields.style.display  = '';
+        actions.style.display = '';
+        submitBtn.disabled    = false;
+      }
+
+      dropZone.addEventListener('click', () => input.click());
+      input.addEventListener('change', () => { if (input.files.length) validateAndShow([...input.files]); });
+      dropZone.addEventListener('dragover',  (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+      dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault(); dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) validateAndShow([...e.dataTransfer.files]);
+      });
+
+      cancelBtn.addEventListener('click', resetUpload);
+
+      submitBtn.addEventListener('click', async () => {
+        if (!_pendingFiles.length) return;
+        submitBtn.disabled = true;
+        cancelBtn.disabled = true;
+        const source     = wrap.querySelector('#ecos-meta-source').value.trim();
+        const specialite = wrap.querySelector('#ecos-meta-specialite').value.trim();
+        const newFiles   = [];
+
+        for (const file of _pendingFiles) {
+          const itemEl   = [...progress.querySelectorAll('.ecos-upload-item')].find(el => el.dataset.fname === file.name);
+          const barEl    = itemEl?.querySelector('.ecos-upload-bar');
+          const statusEl = itemEl?.querySelector('.ecos-upload-status');
+          if (statusEl) statusEl.textContent = '…';
+          try {
+            const { storagePath, downloadUrl, gsUrl } = await uploadEcosFile(file, sddN, (pct) => {
+              if (barEl) barEl.style.width = pct + '%';
+              if (statusEl) statusEl.textContent = pct + '%';
+            });
+            if (barEl) barEl.style.width = '100%';
+            const docId = await saveEcosFileMeta(sddN, { name: file.name, downloadUrl, storagePath, gsUrl, source, specialite, sizeBytes: file.size, mimeType: file.type });
+            if (statusEl) { statusEl.textContent = '✓'; statusEl.className = 'ecos-upload-status done'; }
+            newFiles.push({ id: docId, name: file.name, url: downloadUrl, storagePath, gsUrl, source, specialite, sizeBytes: file.size, uploadedBy: currentUid });
+          } catch (err) {
+            console.error('[ECOS Upload]', err);
+            if (statusEl) { statusEl.textContent = '✗'; statusEl.className = 'ecos-upload-status error'; }
+            if (barEl) barEl.style.background = 'var(--danger)';
+          }
+        }
+
+        if (newFiles.length) { _files = [..._files, ...newFiles]; renderFileList(_files, currentUid); }
+        setTimeout(() => { resetUpload(); cancelBtn.disabled = false; }, 1200);
+      });
+
+      return wrap;
+    }
+    // ── Chargement initial et montage ─────────────────────────────────────
     let loaded = false;
-    async function loadIfNeeded() {
+    async function loadAndRender() {
       if (loaded) return;
       loaded = true;
+
+      body.innerHTML = '';
+
+      // Récupérer l'uid courant pour les droits de suppression
+      const tok = await cloudEnsureSession().catch(() => null);
+      const currentUid = tok?.uid || '';
+
+      // Liste des fichiers
+      let files = [];
       try {
-        const files = await loadEcosFiles(sddN);
-        renderEcosFiles(files);
+        files = await loadEcosFiles(sddN);
       } catch (e) {
-        body.innerHTML = `<p style="color:var(--danger);font-size:12px;margin:0">⚠ ${escapeHtml(e.message)}</p>`;
+        const errP = document.createElement('p');
+        errP.style.cssText = 'color:var(--danger);font-size:12px;margin:0 0 10px';
+        errP.textContent = '⚠ ' + e.message;
+        body.appendChild(errP);
+      }
+
+      const listWrap = renderFileList(files, currentUid);
+      body.appendChild(listWrap);
+
+      // Zone upload
+      if (cloudEnabled()) {
+        const uploadWrap = buildUploadZone(currentUid);
+        body.appendChild(uploadWrap);
       }
     }
 
-    if (!ecosCollapsed) loadIfNeeded();
+    if (!ecosCollapsed) loadAndRender();
 
-    ecosCard.querySelector('.sc-head').addEventListener('click', e => {
-      if (e.target.closest('button,a')) return;
+    ecosCard.querySelector('.sc-head').addEventListener('click', (e) => {
+      if (e.target.closest('button,a,input')) return;
       const collapsed = ecosCard.classList.toggle('collapsed');
       setCollapsedKey(`sdd_${sddN}_ecos`, collapsed);
-      if (!collapsed) loadIfNeeded();
+      if (!collapsed) loadAndRender();
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BUILD SDD PAGE
+  // ══════════════════════════════════════════════════════════════════════════
   function buildSDD() {
     const tables = document.querySelectorAll('.navbox table');
 
@@ -2466,44 +2030,37 @@ function openEcosPreview(file) {
 
     document.body.innerHTML = '';
 
-    // ── Prev / Next depuis localStorage ──────────────────────────────────────
+    // Nav prev/next
     let navOrder = [], navItems = {}, navIdx = -1;
     try {
       const ord = localStorage.getItem('uness_sdd_nav_order');
       const its = localStorage.getItem('uness_sdd_nav_items');
       if (ord) navOrder = JSON.parse(ord);
-      if (its) {
-        const arr = JSON.parse(its);
-        for (const it of arr) navItems[it.num] = it;
-      }
+      if (its) { const arr = JSON.parse(its); for (const it of arr) navItems[it.num] = it; }
       if (sddN) navIdx = navOrder.indexOf(sddN);
     } catch (_) {}
 
-    const prevNum = navIdx > 0              ? navOrder[navIdx - 1] : null;
-    const nextNum = navIdx < navOrder.length - 1 ? navOrder[navIdx + 1] : null;
+    const prevNum  = navIdx > 0                  ? navOrder[navIdx - 1] : null;
+    const nextNum  = navIdx < navOrder.length - 1 ? navOrder[navIdx + 1] : null;
     const prevHref = prevNum ? (navItems[prevNum]?.href || '#') : null;
     const nextHref = nextNum ? (navItems[nextNum]?.href || '#') : null;
     const navPos   = navOrder.length > 0 && navIdx >= 0 ? `${navIdx + 1} / ${navOrder.length}` : '';
 
-    // Breadcrumb
     const bc = document.createElement('div');
     bc.id = 'sdd-bc';
     bc.innerHTML = `
-      <a href="/lisa/2025/Accueil">Accueil</a>
-      <span class="sep">›</span>
-      <a href="/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part">Situations de départ</a>
-      <span class="sep">›</span>
+      <a href="/lisa/2025/Accueil">Accueil</a><span class="sep">›</span>
+      <a href="/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part">Situations de départ</a><span class="sep">›</span>
       <strong style="color:var(--text2);font-weight:var(--fw-semi)">${escapeHtml(sddNum)}</strong>
       <span class="bc-spacer"></span>
       ${navOrder.length > 1 ? `
-        <a class="sdd-nav-btn${prevHref ? '' : ' disabled'}" ${prevHref ? `href="${escapeHtml(prevHref)}"` : ''} title="${prevNum ? `SDD-${pad3(prevNum)}` : ''}">‹ Préc.</a>
+        <a class="sdd-nav-btn${prevHref ? '' : ' disabled'}" ${prevHref ? `href="${escapeHtml(prevHref)}"` : ''}>‹ Préc.</a>
         ${navPos ? `<span id="sdd-nav-pos">${navPos}</span>` : ''}
-        <a class="sdd-nav-btn${nextHref ? '' : ' disabled'}" ${nextHref ? `href="${escapeHtml(nextHref)}"` : ''} title="${nextNum ? `SDD-${pad3(nextNum)}` : ''}">Suiv. ›</a>
+        <a class="sdd-nav-btn${nextHref ? '' : ' disabled'}" ${nextHref ? `href="${escapeHtml(nextHref)}"` : ''}>Suiv. ›</a>
       ` : ''}
-      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
+      ${cloudEnabled() ? '<button class="btn-logout" id="btn-logout-sdd" title="Déconnexion cloud">⊗</button>' : ''}`;
     document.body.appendChild(bc);
 
-    // Raccourcis clavier prev/next
     if (navOrder.length > 1) {
       document.addEventListener('keydown', (e) => {
         if (document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT') return;
@@ -2512,7 +2069,6 @@ function openEcosPreview(file) {
       });
     }
 
-    // Header
     const top = document.createElement('div');
     top.id = 'sdd-top';
     top.innerHTML = `
@@ -2525,15 +2081,12 @@ function openEcosPreview(file) {
     document.body.appendChild(top);
 
     document.getElementById('btn-logout-sdd')?.addEventListener('click', () => {
-      if (confirm('Se déconnecter du cloud sync ?\n\nUsername et PIN seront effacés localement. Tes données restent sur le cloud.')) {
-        window.cloudDisconnect();
-      }
+      if (confirm('Se déconnecter du cloud sync ?')) window.cloudDisconnect();
     });
 
-    const body = document.createElement('div');
-    body.id = 'sdd-body';
+    const bodyEl = document.createElement('div');
+    bodyEl.id = 'sdd-body';
 
-    // Helper: card collapsible
     function card(title, dotColor, innerHTML, key) {
       const collapsed = (sddN != null && key) ? isCollapsedKey(`sdd_${sddN}_${key}`) : false;
       const div = document.createElement('div');
@@ -2559,34 +2112,23 @@ function openEcosPreview(file) {
     function attTable(rows, tableKey) {
       if (!rows.length) return '<p style="color:var(--muted);font-size:var(--fs-base);font-style:italic">Aucun attendu.</p>';
       return '<table class="at"><thead><tr>' +
-        '<th style="width:55%">Attendu</th>' +
-        '<th style="width:25%">Domaines</th>' +
-        '<th>Compétences</th>' +
+        '<th style="width:55%">Attendu</th><th style="width:25%">Domaines</th><th>Compétences</th>' +
         '</tr></thead><tbody>' +
         rows.map((r, i) => {
-          const attId   = `att-${tableKey}-${sddN}-${i}`;
+          const attId  = `att-${tableKey}-${sddN}-${i}`;
           const attText = r.text;
           const domainsHtml = r.domains.map(d => '<span class="tag tag-d">' + escapeHtml(d) + '</span>').join('');
           const compsHtml   = r.comps.map(c => '<span class="tag tag-c">' + escapeHtml(c) + '</span>').join('');
           const linkHtml    = r.href ? '<a href="' + escapeHtml(r.href) + '">' + escapeHtml(attText) + '</a>' : escapeHtml(attText);
           return '<tr class="att-row">' +
-            '<td>' +
-              linkHtml +
-              '<button class="att-ai-btn" data-att-id="' + attId + '" data-att-text="' + attText.replace(/"/g, '&quot;') + '" title="Expliquer cet attendu">✦</button>' +
-            '</td>' +
+            '<td>' + linkHtml + '<button class="att-ai-btn" data-att-id="' + attId + '" data-att-text="' + attText.replace(/"/g, '&quot;') + '" title="Expliquer cet attendu">✦</button></td>' +
             '<td>' + domainsHtml + '</td>' +
-            '<td>' + compsHtml + '</td>' +
-            '</tr>' +
-            '<tr class="att-panel-row" id="panelrow-' + attId + '" style="display:none">' +
-              '<td colspan="3" style="padding:0!important;border-top:none">' +
-                '<div class="att-ai-panel" id="panel-' + attId + '" style="margin:0;border-radius:0;border-left:none;border-right:none;border-bottom:none"></div>' +
-              '</td>' +
-            '</tr>';
+            '<td>' + compsHtml + '</td></tr>' +
+            '<tr class="att-panel-row" id="panelrow-' + attId + '" style="display:none"><td colspan="3" style="padding:0!important;border-top:none"><div class="att-ai-panel" id="panel-' + attId + '" style="margin:0;border-radius:0;border-left:none;border-right:none;border-bottom:none"></div></td></tr>';
         }).join('') +
         '</tbody></table>';
     }
 
-    // Colonne droite
     const content = document.createElement('div');
     content.style.cssText = 'display:flex;flex-direction:column;gap:16px;min-width:0';
 
@@ -2602,7 +2144,7 @@ function openEcosPreview(file) {
     if (att_specifique.length) content.appendChild(card('Attendus spécifiques',               '#3b82f6', attTable(att_specifique, 'specifique'), 'att_specifique'));
     if (att_stage.length)      content.appendChild(card('Valorisation du stage',              '#f59e0b', attTable(att_stage,      'stage'),      'att_stage'));
 
-    // Colonne gauche : notes
+    // Colonne gauche
     const follow = document.createElement('div');
     follow.id = 'sdd-follow';
 
@@ -2619,16 +2161,13 @@ function openEcosPreview(file) {
       _dragStartX = e.clientX;
       _dragStartW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--notes-col'), 10) || savedW;
       resizeHandle.classList.add('dragging');
-
       const onMove = (e) => {
-        const delta = e.clientX - _dragStartX;
-        const newW  = Math.min(CFG.notesColMax, Math.max(CFG.notesColMin, _dragStartW + delta));
+        const newW = Math.min(CFG.notesColMax, Math.max(CFG.notesColMin, _dragStartW + (e.clientX - _dragStartX)));
         document.documentElement.style.setProperty('--notes-col', newW + 'px');
       };
       const onUp = (e) => {
         resizeHandle.classList.remove('dragging');
-        const finalW = Math.min(CFG.notesColMax, Math.max(CFG.notesColMin, _dragStartW + (e.clientX - _dragStartX)));
-        GM_setValue('uness_notes_col_width', finalW);
+        GM_setValue('uness_notes_col_width', Math.min(CFG.notesColMax, Math.max(CFG.notesColMin, _dragStartW + (e.clientX - _dragStartX))));
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
       };
@@ -2642,41 +2181,34 @@ function openEcosPreview(file) {
       const doneDate       = getDoneDate(sddN);
       const doneDateStr    = doneDate ? formatDoneDate(doneDate) : '';
 
-      // ── Notes Markdown : preview rendu / textarea brut ──
       const notesHTML =
         '<div class="status-picker" id="status-picker">' +
-        '  <button class="status-btn" data-st="todo" title="À faire">À faire</button>' +
-        '  <button class="status-btn" data-st="inprogress" title="En cours">En cours</button>' +
-        '  <button class="status-btn" data-st="done" title="Faite">✓ Faite</button>' +
+        '  <button class="status-btn" data-st="todo">À faire</button>' +
+        '  <button class="status-btn" data-st="inprogress">En cours</button>' +
+        '  <button class="status-btn" data-st="done">✓ Faite</button>' +
         '</div>' +
         '<div class="md-editor-wrap" id="md-editor-wrap" style="margin-top:8px">' +
         '  <div class="md-toolbar" id="md-toolbar">' +
-        '    <button class="md-tb-btn" data-md="**" title="Gras"><strong>G</strong></button>' +
-        '    <button class="md-tb-btn" data-md="*" title="Italique"><em>I</em></button>' +
-        '    <button class="md-tb-btn" data-md="`" title="Code">` `</button>' +
+        '    <button class="md-tb-btn" data-md="**"><strong>G</strong></button>' +
+        '    <button class="md-tb-btn" data-md="*"><em>I</em></button>' +
+        '    <button class="md-tb-btn" data-md="`">` `</button>' +
         '    <span class="md-tb-sep"></span>' +
-        '    <button class="md-tb-btn" data-md="## " data-line title="Titre">H</button>' +
-        '    <button class="md-tb-btn" data-md="- " data-line title="Liste">•</button>' +
+        '    <button class="md-tb-btn" data-md="## " data-line>H</button>' +
+        '    <button class="md-tb-btn" data-md="- " data-line>•</button>' +
         '  </div>' +
         '  <div class="md-preview" id="md-preview"></div>' +
         '  <textarea class="md-textarea" id="md-textarea" placeholder="Notes en Markdown…" spellcheck="false"></textarea>' +
         '  <div id="wy-save-status"></div>' +
         '</div>';
 
-      const noteCardTitle = 'Suivi & notes';
-      const noteCard = card(noteCardTitle, '#4f46e5', notesHTML, 'notes');
+      const noteCard = card('Suivi & notes', '#4f46e5', notesHTML, 'notes');
 
-      // Date badge
       const headLabel = noteCard.querySelector('.sc-head-label');
       const dateBadge = document.createElement('span');
       dateBadge.className = 'sc-head-date';
       dateBadge.id = 'notes-date-badge';
-      if (currentStatus === 'done' && doneDateStr) {
-        dateBadge.textContent = doneDateStr;
-        dateBadge.style.display = '';
-      } else {
-        dateBadge.style.display = 'none';
-      }
+      if (currentStatus === 'done' && doneDateStr) { dateBadge.textContent = doneDateStr; dateBadge.style.display = ''; }
+      else dateBadge.style.display = 'none';
       headLabel.after(dateBadge);
 
       const mdWrap     = noteCard.querySelector('#md-editor-wrap');
@@ -2684,21 +2216,13 @@ function openEcosPreview(file) {
       const mdTextarea = noteCard.querySelector('#md-textarea');
       const saveStatus = noteCard.querySelector('#wy-save-status');
       const picker     = noteCard.querySelector('#status-picker');
+      const mdToolbar  = noteCard.querySelector('#md-toolbar');
 
-      // ── Preview : Markdown → HTML ──
-      function renderPreview(md) {
-        const html = mdToHtml(md || '');
-        // mdToHtml retourne un fallback si vide, donc toujours truthy
-        mdPreview.innerHTML = html;
-      }
+      function renderPreview(md) { mdPreview.innerHTML = mdToHtml(md || ''); }
 
-      // Initialisation
       const _initMd = getNotes(sddN);
       mdTextarea.value = _initMd;
       renderPreview(_initMd);
-
-      // ── Bascule édition / lecture ──
-      const mdToolbar = noteCard.querySelector('#md-toolbar');
 
       function enterEdit() {
         if (mdWrap.classList.contains('editing')) return;
@@ -2707,7 +2231,6 @@ function openEcosPreview(file) {
         const len = mdTextarea.value.length;
         mdTextarea.setSelectionRange(len, len);
       }
-
       function exitEdit() {
         if (!mdWrap.classList.contains('editing')) return;
         mdWrap.classList.remove('editing');
@@ -2716,21 +2239,15 @@ function openEcosPreview(file) {
       }
 
       mdPreview.addEventListener('click', enterEdit);
-      mdWrap.addEventListener('click', (e) => {
-        if (!mdWrap.classList.contains('editing')) enterEdit();
-      });
+      mdWrap.addEventListener('click', (e) => { if (!mdWrap.classList.contains('editing')) enterEdit(); });
+      mdTextarea.addEventListener('blur', () => { setTimeout(exitEdit, 150); });
 
-      mdTextarea.addEventListener('blur', () => {
-        setTimeout(exitEdit, 150);
-      });
-
-      // ── Statut ──
       function applyStatus(st) {
         picker.querySelectorAll('.status-btn').forEach(btn => {
           btn.classList.remove('active-todo', 'active-inprogress', 'active-done');
           if (btn.dataset.st === st) btn.classList.add('active-' + st);
         });
-        const dd    = getDoneDate(sddN);
+        const dd = getDoneDate(sddN);
         const ddStr = dd ? formatDoneDate(dd) : '';
         const badge = noteCard.querySelector('#notes-date-badge');
         if (st === 'done' && ddStr) { badge.textContent = ddStr; badge.style.display = ''; }
@@ -2739,14 +2256,9 @@ function openEcosPreview(file) {
       applyStatus(currentStatus);
 
       picker.querySelectorAll('.status-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setStatus(sddN, btn.dataset.st);
-          applyStatus(btn.dataset.st);
-        });
+        btn.addEventListener('click', (e) => { e.stopPropagation(); setStatus(sddN, btn.dataset.st); applyStatus(btn.dataset.st); });
       });
 
-      // ── Sauvegarde ──
       let _saveTimer = null;
       function saveNow() {
         const md = mdTextarea.value;
@@ -2763,31 +2275,21 @@ function openEcosPreview(file) {
         _saveTimer = setTimeout(saveNow, CFG.autosaveDelay);
       });
 
-      // ── Helper : wrap/toggle marqueur Markdown autour de la sélection ──
       function mdInline(marker) {
-        const ta  = mdTextarea;
-        const s   = ta.selectionStart, e2 = ta.selectionEnd;
-        const val = ta.value;
+        const ta = mdTextarea, s = ta.selectionStart, e2 = ta.selectionEnd, val = ta.value, len = marker.length;
         const sel = val.slice(s, e2);
-        const len = marker.length;
-        // Déjà wrapé → on retire
         if (val.slice(s - len, s) === marker && val.slice(e2, e2 + len) === marker) {
           ta.value = val.slice(0, s - len) + sel + val.slice(e2 + len);
-          ta.selectionStart = s - len;
-          ta.selectionEnd   = e2 - len;
+          ta.selectionStart = s - len; ta.selectionEnd = e2 - len;
         } else {
           ta.value = val.slice(0, s) + marker + sel + marker + val.slice(e2);
-          ta.selectionStart = s + len;
-          ta.selectionEnd   = e2 + len;
+          ta.selectionStart = s + len; ta.selectionEnd = e2 + len;
         }
         ta.dispatchEvent(new Event('input', { bubbles: true }));
       }
 
-      // ── Helper : wrap/toggle préfixe de ligne ──
       function mdPrefix(prefix) {
-        const ta  = mdTextarea;
-        const s   = ta.selectionStart;
-        const val = ta.value;
+        const ta = mdTextarea, s = ta.selectionStart, val = ta.value;
         const lineStart = val.lastIndexOf('\n', s - 1) + 1;
         if (val.slice(lineStart, lineStart + prefix.length) === prefix) {
           ta.value = val.slice(0, lineStart) + val.slice(lineStart + prefix.length);
@@ -2805,41 +2307,22 @@ function openEcosPreview(file) {
         if (mod && /^[bB]$/.test(e.key)) { e.preventDefault(); mdInline('**'); return; }
         if (mod && /^[iI]$/.test(e.key)) { e.preventDefault(); mdInline('*'); return; }
         if (mod && /^[uU]$/.test(e.key)) { e.preventDefault(); mdInline('__'); return; }
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          const s = mdTextarea.selectionStart, end2 = mdTextarea.selectionEnd;
-          mdTextarea.value = mdTextarea.value.slice(0, s) + '  ' + mdTextarea.value.slice(end2);
-          mdTextarea.selectionStart = mdTextarea.selectionEnd = s + 2;
-        }
+        if (e.key === 'Tab')    { e.preventDefault(); const s = mdTextarea.selectionStart, e2 = mdTextarea.selectionEnd; mdTextarea.value = mdTextarea.value.slice(0,s)+'  '+mdTextarea.value.slice(e2); mdTextarea.selectionStart=mdTextarea.selectionEnd=s+2; }
         if (e.key === 'Escape') { e.preventDefault(); exitEdit(); }
       });
 
-      // ── Toolbar buttons ──
       mdToolbar && mdToolbar.addEventListener('mousedown', (e) => {
         const btn = e.target.closest('.md-tb-btn');
         if (!btn) return;
-        e.preventDefault(); // keep textarea focus
-        const md  = btn.dataset.md || '';
-        const isLine = btn.hasAttribute('data-line');
-        if (isLine) { mdPrefix(md); } else { mdInline(md); }
+        e.preventDefault();
+        const md = btn.dataset.md || '';
+        btn.hasAttribute('data-line') ? mdPrefix(md) : mdInline(md);
       });
 
       follow.appendChild(noteCard);
-    } else {
-      const err = document.createElement('div');
-      err.className = 'sc';
-      err.innerHTML = `
-        <div class="sc-head">
-          <div class="sc-dot" style="background:#4f46e5"></div>
-          Suivi &amp; notes
-        </div>
-        <div class="sc-body" style="color:var(--muted);font-style:italic">
-          Impossible d'identifier le numéro SDD sur cette page.
-        </div>`;
-      follow.appendChild(err);
     }
 
-    // ── Encart Notes de la communauté ──
+    // ── Notes de la communauté ──
     if (sddN != null) {
       const commCard = document.createElement('div');
       commCard.className = 'sc';
@@ -2850,25 +2333,20 @@ function openEcosPreview(file) {
         <div class="sc-head">
           <div class="sc-dot" style="background:linear-gradient(135deg,#6366f1,#d97706)"></div>
           <span class="sc-head-label">Notes de la communauté</span>
-          <span style="margin-left:6px;font-size:10px;background:#eef2ff;color:#4f46e5;
-            padding:2px 6px;border-radius:999px;font-weight:var(--fw-bold);letter-spacing:.5px">IA</span>
+          <span style="margin-left:6px;font-size:10px;background:#eef2ff;color:#4f46e5;padding:2px 6px;border-radius:999px;font-weight:var(--fw-bold);letter-spacing:.5px">IA</span>
           <span class="sc-toggle">▾</span>
         </div>
         <div class="sc-body" id="community-body"></div>`;
       follow.appendChild(commCard);
 
       const commBody = commCard.querySelector('#community-body');
-      if (!commCollapsed) {
-        communityNotesLoad(sddN, sddName, commBody);
-      }
+      if (!commCollapsed) communityNotesLoad(sddN, sddName, commBody);
 
       commCard.querySelector('.sc-head').addEventListener('click', (e) => {
         if (e.target.closest('button,input,textarea,select,a,label')) return;
         const nowCollapsed = commCard.classList.toggle('collapsed');
         setCollapsedKey(`sdd_${sddN}_community`, nowCollapsed);
-        if (!nowCollapsed && !commBody.innerHTML.trim()) {
-          communityNotesLoad(sddN, sddName, commBody);
-        }
+        if (!nowCollapsed && !commBody.innerHTML.trim()) communityNotesLoad(sddN, sddName, commBody);
       });
     }
 
@@ -2877,39 +2355,28 @@ function openEcosPreview(file) {
       buildEcosCard(sddN, sddName, follow);
     }
 
-    body.appendChild(follow);
-    body.appendChild(content);
-    document.body.appendChild(body);
+    bodyEl.appendChild(follow);
+    bodyEl.appendChild(content);
+    document.body.appendChild(bodyEl);
 
-    // ── Délégation : boutons IA par attendu ──
+    // ── IA par attendu ──
     content.addEventListener('click', async (e) => {
       const btn = e.target.closest('.att-ai-btn');
       if (!btn) return;
 
-      const attId    = btn.dataset.attId;
-      const attText  = btn.dataset.attText;
-      const panel    = document.getElementById('panel-' + attId);
+      const attId   = btn.dataset.attId;
+      const attText = btn.dataset.attText;
+      const panel   = document.getElementById('panel-' + attId);
       const panelRow = document.getElementById('panelrow-' + attId);
       if (!panel) return;
 
-      const showPanel = () => {
-        if (panelRow) panelRow.style.display = '';
-        panel.classList.add('visible');
-        btn.classList.add('active');
-        btn.textContent = '✦';
-      };
-      const hidePanel = () => {
-        if (panelRow) panelRow.style.display = 'none';
-        panel.classList.remove('visible');
-        btn.classList.remove('active');
-        btn.textContent = '✦';
-      };
+      const showPanel = () => { if (panelRow) panelRow.style.display = ''; panel.classList.add('visible'); btn.classList.add('active'); btn.textContent = '✦'; };
+      const hidePanel = () => { if (panelRow) panelRow.style.display = 'none'; panel.classList.remove('visible'); btn.classList.remove('active'); btn.textContent = '✦'; };
 
       if (panel.classList.contains('visible')) { hidePanel(); return; }
       if (panel.innerHTML.trim()) { showPanel(); return; }
 
-      btn.classList.add('loading');
-      btn.textContent = '…';
+      btn.classList.add('loading'); btn.textContent = '…';
       if (panelRow) panelRow.style.display = '';
 
       try {
@@ -2924,15 +2391,15 @@ function openEcosPreview(file) {
       }
     });
 
-    // Gestion du collapse pour toutes les cards
+    // Collapse cards
     document.querySelectorAll('#sdd-body .sc').forEach(sc => {
       const head = sc.querySelector('.sc-head');
       const key  = sc.dataset.key;
       if (!head || !key || sddN == null) return;
-
       head.addEventListener('click', (e) => {
         if (e.target.closest('button,input,textarea,select,a,label')) return;
         if (key === 'community') return;
+        if (key === 'ecos') return; // géré dans buildEcosCard
         const collapsed = sc.classList.toggle('collapsed');
         setCollapsedKey(`sdd_${sddN}_${key}`, collapsed);
       });
