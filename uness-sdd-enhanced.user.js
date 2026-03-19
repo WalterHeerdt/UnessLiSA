@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      12.0
+// @version      13.0
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS + Point rouge ECOS + Filtre ECOS + Checkbox station faite + Notation /5 + Haptics mobile
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -25,6 +25,10 @@
 // @connect      api.openai.com
 // @connect      cloudfunctions.net
 // @connect      haptics.lochie.me
+// @require      https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js
+// @resource     TOAST_UI_CSS https://uicdn.toast.com/editor/latest/toastui-editor.min.css
+// @grant        GM_addStyle
+// @grant        GM_getResourceText
 // ==/UserScript==
 
 (async function () {
@@ -53,7 +57,108 @@
     if (!_hapticTrigger) return;
     try { _hapticTrigger(type); } catch (_) {}
   }
+  // ══════════════════════════════════════════════════════════════════════════
+  // TOAST UI EDITOR
+  // ══════════════════════════════════════════════════════════════════════════
+  let _toastAssetsInjected = false;
 
+  function ensureToastAssets() {
+    if (_toastAssetsInjected) return;
+    _toastAssetsInjected = true;
+
+    try {
+      const css = GM_getResourceText('TOAST_UI_CSS');
+      if (css) GM_addStyle(css);
+    } catch (_) {}
+
+    const style = document.createElement('style');
+    style.textContent = `
+      .toastui-editor-defaultUI{
+        border:none!important;
+        border-radius:0!important;
+        overflow:visible!important;
+        background:#fff!important;
+      }
+      .toastui-editor-toolbar{
+        border-bottom:1px solid var(--border)!important;
+        background:var(--surface2)!important;
+        padding:3px 6px!important;
+        min-height:0!important;
+        border-radius:var(--r-sm) var(--r-sm) 0 0!important;
+      }
+      .toastui-editor-toolbar-group{
+        margin:0!important;
+      }
+      .toastui-editor-toolbar-divider{
+        margin:0 3px!important;
+      }
+      .toastui-editor-mode-switch{
+        display:none!important;
+      }
+      .toastui-editor-main{
+        background:#fff!important;
+        overflow:visible!important;
+      }
+      .toastui-editor-contents{
+        font-family:var(--ff)!important;
+        font-size:13px!important;
+        color:var(--text2)!important;
+      }
+      .toastui-editor-md-container,
+      .toastui-editor-ww-container{
+        background:#fff!important;
+        overflow:visible!important;
+      }
+      .toastui-editor-ww-container .ProseMirror{
+        padding:12px 14px!important;
+        min-height:200px!important;
+        overflow-y:visible!important;
+        border-radius:0 0 var(--r-sm) var(--r-sm)!important;
+      }
+      .toastui-editor-md-container .toastui-editor-md-preview,
+      .toastui-editor-md-container .toastui-editor{
+        min-height:200px!important;
+        overflow:visible!important;
+        border-radius:0 0 var(--r-sm) var(--r-sm)!important;
+      }
+      .toastui-editor-main-container{
+        overflow:visible!important;
+      }
+      .toastui-editor-popup{
+        z-index:1200!important;
+      }
+      .toastui-editor-ww-container .ProseMirror ul{
+        list-style:disc!important;
+        padding-left:1.5em!important;
+      }
+      .toastui-editor-ww-container .ProseMirror ol{
+        list-style:decimal!important;
+        padding-left:1.5em!important;
+      }
+      .toastui-editor-ww-container .ProseMirror li{
+        position:static!important;
+      }
+      .toastui-editor-ww-container .ProseMirror li::before{
+        display:none!important;
+        content:none!important;
+      }
+      .toastui-editor-defaultUI *{
+        scrollbar-width:none!important;
+      }
+      .toastui-editor-defaultUI *::-webkit-scrollbar{
+        display:none!important;
+        width:0!important;
+        height:0!important;
+      }
+      .toastui-editor-toolbar-icons{
+        opacity:.9;
+      }
+      .toastui-editor-toolbar-icons:hover{
+        opacity:1;
+      }
+    `;
+    document.head.appendChild(style);
+  }
   // ══════════════════════════════════════════════════════════════════════════
   // CONFIG
   // ══════════════════════════════════════════════════════════════════════════
@@ -68,7 +173,7 @@
     railsMin:14, railsMax:48, breakpointOneCol:980, stickyTop:14,
     cacheTTLms: 48 * 60 * 60 * 1000,
     ecosCacheTTLms: 6 * 60 * 60 * 1000,
-    autosaveDelay: 15000, indentSpaces: 2,
+    autosaveDelay: 4000, indentSpaces: 2,
     ecos: {
       maxFileSizeMB: 50,
       allowedTypes: ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'],
@@ -373,7 +478,7 @@
     s = s.replace(/^##\s(.+)$/gm,     '<h2 style="margin:.1em 0;font-size:13px;font-weight:700">$1</h2>');
     s = s.replace(/^#\s(.+)$/gm,      '<h1 style="margin:.15em 0;font-size:14px;font-weight:800">$1</h1>');
     s = s.replace(/^(?:- |\* )(.*)$/gm, '<li>$1</li>');
-    s = s.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul style="margin:.1em 0;padding-left:1.1em;list-style:disc;color:var(--text2);font-size:12px">${m.replace(/<\/li>\n<li>/g, '</li><li>')}</ul>`);
+      s = s.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul style="margin:.1em 0;padding-left:1.1em;list-style:disc;color:var(--text2);font-size:12px">${m.replace(/<\/li>\n<li>/g, '</li><li>')}</ul>`);
     s = s.replace(/\n(?!\n)/g, '<br>');
     s = s.split(/\n+/).map(block => {
       const t = block.trim();
@@ -516,19 +621,25 @@
     } catch (e) { console.warn('[UNESS-COMMUNITY] Migration échouée:', e.message); }
   }
   async function publicNoteMirrorPush(sddN, md) { if (!cloudEnabled() || !sddN) return; try { await callFunction('mirrorPublicNote', { sddN, note: md || '' }); } catch (_) {} }
-  async function communityNotesLoad(sddN, sddName, containerEl) {
+  async function communityNotesLoad(sddN, sddName, containerEl, forceRefresh = false) {
     if (!cloudEnabled() || !sddN) return; containerEl.innerHTML = communityLoadingHTML();
     try {
-      const result = await callFunction('generateCommunitySummary', { sddN, sddName });
+      const result = await callFunction('generateCommunitySummary', { sddN, sddName, forceRefresh });
       const { summary, noteCount, updatedAt } = result;
       if (!summary) { containerEl.innerHTML = communityEmptyHTML(); return; }
       containerEl.innerHTML = communitySummaryHTML(summary, noteCount, updatedAt);
+      const regenBtn = containerEl.querySelector('#community-regen-btn');
+      if (regenBtn) regenBtn.addEventListener('click', () => communityNotesLoad(sddN, sddName, containerEl, true));
     } catch (e) { containerEl.innerHTML = communityErrorHTML(e.message); }
   }
   function communitySummaryHTML(summary, noteCount, updatedAt) {
     if (!summary || !summary.trim()) return communityEmptyHTML();
     const date = new Date(updatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    return '<div style="font-size:var(--fs-tiny);color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">Synthèse de <strong style="color:var(--text)">' + noteCount + '</strong> note(s) · Générée le ' + date + '</div>' + communityMarkdownToHtml(summary);
+    return '<div style="display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-tiny);color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">'
+      + '<span>Synthèse de <strong style="color:var(--text)">' + noteCount + '</strong> note(s) · Générée le ' + date + '</span>'
+      + '<button id="community-regen-btn" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:var(--fs-tiny);font-family:inherit;padding:2px 8px;cursor:pointer;border-radius:3px;line-height:1.4" title="Forcer la regénération">↻ Regénérer</button>'
+      + '</div>'
+      + communityMarkdownToHtml(summary);
   }
   function communityMarkdownToHtml(md) {
     if (!md) return '';
@@ -676,7 +787,10 @@
       <style>
       *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
       ${cssVarsRoot()}
-      html,body{background:var(--bg);color:var(--text);height:100%;font-family:var(--ff);font-size:var(--fs-base);font-weight:var(--fw-base);overflow-x:hidden}
+      html,body{background:var(--bg);color:var(--text);height:100%;font-family:var(--ff);font-size:var(--fs-base);font-weight:var(--fw-base);overflow-x:hidden;scrollbar-width:none}
+      html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
+      *{scrollbar-width:none!important}
+      *::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
       header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 40px;display:flex;align-items:center;gap:14px}
       .h-badge{background:var(--ac);color:#fff;font-size:var(--fs-tiny);font-weight:var(--fw-bold);letter-spacing:.9px;text-transform:uppercase;padding:5px 10px;border-radius:var(--r-sm);flex-shrink:0}
       header h1{font-size:calc(var(--fs-base) + 1px);font-weight:var(--fw-semi);color:var(--text);letter-spacing:-.2px}
@@ -739,12 +853,27 @@
       ${LOGOUT_BTN_CSS}
       @media(max-width:640px){header,.ctrl,main{padding-left:14px;padding-right:14px}.row-tags{display:none}select{max-width:200px}}
       @keyframes spin{to{transform:rotate(360deg)}}
+      #btn-ecos-random{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:color var(--transition),border-color var(--transition)}
+      #btn-ecos-random:hover{color:#7c3aed;border-color:#7c3aed}
+      #ecos-preview-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
+      #ecos-preview-panel{width:min(900px,95vw);height:90vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+      #ecos-preview-head{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:var(--fs-small);font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff;flex-wrap:wrap}
+      #ecos-preview-head .pv-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+      #ecos-preview-head a.pv-btn{font-size:var(--fs-tiny);color:var(--text2);font-weight:var(--fw-semi);text-decoration:none;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);white-space:nowrap;transition:border-color var(--transition),color var(--transition);background:var(--surface2)} #ecos-preview-head a.pv-btn:hover{border-color:var(--ac);color:var(--ac)}
+      #ecos-preview-head button.pv-close{background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted);padding:2px 6px;border-radius:4px;flex-shrink:0} #ecos-preview-head button.pv-close:hover{color:var(--text);background:var(--surface2)}
+      #ecos-preview-rating{display:flex;align-items:center;gap:2px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface2);flex-shrink:0}
+      #ecos-preview-rating .pr-star{font-size:15px;cursor:pointer;color:var(--border2);transition:color .1s,transform .1s;line-height:1;user-select:none} #ecos-preview-rating .pr-star:hover,#ecos-preview-rating .pr-star.filled{color:#f59e0b;transform:scale(1.15)}
+      #ecos-preview-rating .pr-info{font-size:10px;color:var(--muted);margin-left:4px;white-space:nowrap}
+      #ecos-timer{display:flex;align-items:center;gap:6px;font-size:var(--fs-tiny);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums;color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:3px 8px;background:var(--surface2);flex-shrink:0}
+      #ecos-timer button{background:none;border:none;cursor:pointer;font-size:13px;padding:0 2px;color:var(--muted);line-height:1}
+      #ecos-timer button:hover{color:var(--text)}
+      #ecos-preview-iframe{flex:1;border:none;width:100%}
       </style>`;
 
     document.body.innerHTML = '';
 
     const hdr = document.createElement('header');
-    hdr.innerHTML = `<div class="h-badge">LISA 2025</div><h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1><button id="btn-stats" title="Statistiques &amp; progression">📊 Stats</button><a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗ cloud</button>' : ''}`;
+    hdr.innerHTML = `<div class="h-badge">LISA 2025</div><h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1><button id="btn-stats" title="Statistiques &amp; progression">📊 Stats</button>${cloudEnabled() ? '<button id="btn-ecos-random" title="Station ECOS aléatoire parmi les SDD visibles">🎲 ECOS</button>' : ''}<a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
     document.body.appendChild(hdr);
 
     const ctrl = document.createElement('div');
@@ -777,6 +906,7 @@
     document.body.appendChild(main);
 
     let sort = 'num', query = '', status = 'all', family = '';
+    let _lastFiltered = [];
 
     const _st = new Map(), _dd = new Map(), _rv = new Map();
     for (const item of items) {
@@ -847,6 +977,7 @@
           if (da && db) return db < da ? -1 : db > da ? 1 : 0; if (da) return -1; if (db) return 1; return a.num - b.num;
         });
       }
+      _lastFiltered = filtered.slice();
       statsEl.textContent = `${filtered.length} / ${items.length}`;
       try { localStorage.setItem('uness_sdd_nav_order', JSON.stringify(filtered.map(i => i.num))); localStorage.setItem('uness_sdd_nav_items', JSON.stringify(items.map(i => ({ num: i.num, name: i.name, href: i.href })))); } catch (_) {}
 
@@ -948,6 +1079,27 @@
     }
 
     document.getElementById('btn-stats').addEventListener('click', buildStatsModal);
+
+    document.getElementById('btn-ecos-random')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-ecos-random');
+      if (!cloudEnabled()) return;
+      // Attendre que ecosPresence soit chargée si nécessaire
+      const pool = _lastFiltered.length
+        ? _lastFiltered.filter(item => ecosPresence.has(item.num))
+        : items.filter(item => ecosPresence.has(item.num));
+      if (!pool.length) { alert('Aucune SDD avec ECOS dans la vue actuelle.'); return; }
+      const sdd = pool[Math.floor(Math.random() * pool.length)];
+      const origText = btn.textContent;
+      btn.textContent = '⏳'; btn.disabled = true;
+      try {
+        const files = await loadEcosFiles(sdd.num);
+        if (!files.length) { alert('Aucun fichier ECOS pour ' + sdd.name + '.'); return; }
+        const file = files[Math.floor(Math.random() * files.length)];
+        openEcosPreviewWithTimer(file, sdd.num, sdd.name);
+      } catch (e) { alert('Erreur : ' + e.message); }
+      finally { btn.textContent = origText; btn.disabled = false; }
+    });
+
     render();
   }
 
@@ -1001,15 +1153,13 @@
       .att-ai-panel{display:block;margin-top:0;padding:12px 14px;border-radius:var(--r-sm);border:1px solid #e0e7ff;background:#f8f9ff;font-size:var(--fs-small);line-height:1.7;color:var(--text2)}
       .att-ai-panel.visible{display:block} .att-ai-panel h2,.att-ai-panel h3{font-size:var(--fs-small);font-weight:var(--fw-bold);color:var(--ac);margin:12px 0 4px}
       .att-ai-panel ul{margin:4px 0 8px 16px;padding:0;list-style:disc} .att-ai-panel li{margin-bottom:3px} .att-ai-panel p{margin:4px 0} .att-ai-panel strong{font-weight:var(--fw-semi);color:var(--text)}
-      .md-toolbar{display:none;gap:2px;padding:4px 6px;border-bottom:1px solid var(--border);background:#f8fafc;border-radius:var(--r-sm) var(--r-sm) 0 0;align-items:center}
-      .md-editor-wrap.editing .md-toolbar{display:flex}
-      .md-tb-btn{padding:2px 7px;border:none;background:transparent;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;color:var(--muted);line-height:1.6;transition:background var(--transition),color var(--transition)} .md-tb-btn:hover{background:var(--border);color:var(--text)} .md-tb-sep{width:1px;background:var(--border2);margin:2px 3px;align-self:stretch}
-      .md-editor-wrap{border:1px solid var(--border);border-radius:var(--r-sm);background:#fafcff;transition:border-color var(--transition);cursor:text} .md-editor-wrap:hover{border-color:var(--border2)} .md-editor-wrap.editing{border-color:var(--ac);cursor:auto}
-      .md-preview{padding:10px 12px;min-height:50px;font-size:12px;line-height:1.6;color:var(--text2)}
-      .md-preview:empty::before{content:'Notes… (cliquez pour éditer)';color:var(--muted);font-style:italic;font-size:12px;pointer-events:none}
-      .md-textarea{display:none;width:100%;box-sizing:border-box;padding:10px 12px;border:none;outline:none;background:transparent;resize:vertical;font-family:ui-monospace,monospace;font-size:12px;line-height:1.6;color:var(--text2);min-height:180px;max-height:55vh}
-      .md-editor-wrap.editing .md-preview{display:none} .md-editor-wrap.editing .md-textarea{display:block}
-      #wy-save-status{font-size:10px;color:var(--muted);padding:2px 8px 3px;text-align:right;min-height:16px}
+      #wy-save-status{
+        font-size:10px;
+        color:var(--muted);
+        padding:4px 4px 0;
+        text-align:right;
+        min-height:16px;
+      }
       .status-picker{display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
       .status-btn{flex:1;padding:9px 6px;border:none;border-right:1px solid var(--border);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;color:var(--muted);transition:background var(--transition),color var(--transition);display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap}
       .status-btn:last-child{border-right:none} .status-btn:hover{background:var(--surface2);color:var(--text)}
@@ -1159,6 +1309,49 @@
   // ══════════════════════════════════════════════════════════════════════════
   // ECOS — Preview PDF
   // ══════════════════════════════════════════════════════════════════════════
+  function openEcosPreviewWithTimer(file, sddN, sddName) {
+    // Appelle openEcosPreview standard puis injecte timer + label SDD
+    openEcosPreview(file, null, sddN, null);
+    const head = document.querySelector('#ecos-preview-head');
+    if (!head) return;
+    // Label SDD
+    const title = head.querySelector('.pv-title');
+    if (title && sddName) title.title = sddName + ' — ' + (file?.name || '');
+
+    // Timer 8 min
+    const TOTAL = 8 * 60;
+    let remaining = TOTAL, timerInterval = null, running = false;
+    const timerEl = document.createElement('div'); timerEl.id = 'ecos-timer';
+    timerEl.innerHTML = '<span id="ecos-timer-display">8:00</span><button id="ecos-timer-start" title="Démarrer">▶</button><button id="ecos-timer-reset" title="Réinitialiser">↺</button>';
+    const closeBtn = head.querySelector('#ecos-preview-close');
+    head.insertBefore(timerEl, closeBtn);
+
+    const display = timerEl.querySelector('#ecos-timer-display');
+    const btnStart = timerEl.querySelector('#ecos-timer-start');
+    const btnReset = timerEl.querySelector('#ecos-timer-reset');
+    const fmt = s => Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+    const tick = () => {
+      remaining--;
+      display.textContent = fmt(remaining);
+      if (remaining <= 60) display.style.color = 'var(--danger)';
+      if (remaining <= 0) { clearInterval(timerInterval); running = false; btnStart.textContent = '▶'; haptic?.('warning'); }
+    };
+    btnStart.addEventListener('click', () => {
+      if (running) { clearInterval(timerInterval); running = false; btnStart.textContent = '▶'; }
+      else if (remaining > 0) { timerInterval = setInterval(tick, 1000); running = true; btnStart.textContent = '⏸'; haptic?.('selection'); }
+    });
+    btnReset.addEventListener('click', () => {
+      clearInterval(timerInterval); running = false; remaining = TOTAL;
+      display.textContent = fmt(TOTAL); display.style.color = ''; btnStart.textContent = '▶';
+    });
+    // Cleanup on close
+    const backdrop = document.getElementById('ecos-preview-backdrop');
+    if (backdrop) {
+      const origClose = backdrop.querySelector('#ecos-preview-close');
+      origClose?.addEventListener('click', () => clearInterval(timerInterval), { once: true });
+    }
+  }
+
   function openEcosPreview(file, currentUid, sddN, onDelete) {
     document.getElementById('ecos-preview-backdrop')?.remove();
     const safeUrl = normalizeToFirebaseEndpoint(file?.url);
@@ -1557,8 +1750,8 @@
     if (navOrder.length > 1) {
       document.addEventListener('keydown', e => {
         if (document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT') return;
-        if (e.key === 'ArrowLeft'  && prevHref) location.href = prevHref;
-        if (e.key === 'ArrowRight' && nextHref) location.href = nextHref;
+        if (e.key === ''  && prevHref) location.href = prevHref;
+        if (e.key === '' && nextHref) location.href = nextHref;
       });
     }
 
@@ -1642,19 +1835,8 @@
           <button class="status-btn" data-st="inprogress">En cours</button>
           <button class="status-btn" data-st="done">✓ Faite</button>
         </div>
-        <div class="md-editor-wrap" id="md-editor-wrap" style="margin-top:8px">
-          <div class="md-toolbar" id="md-toolbar">
-            <button class="md-tb-btn" data-md="**"><strong>G</strong></button>
-            <button class="md-tb-btn" data-md="*"><em>I</em></button>
-            <button class="md-tb-btn" data-md="\`">\` \`</button>
-            <span class="md-tb-sep"></span>
-            <button class="md-tb-btn" data-md="## " data-line>H</button>
-            <button class="md-tb-btn" data-md="- " data-line>•</button>
-          </div>
-          <div class="md-preview" id="md-preview"></div>
-          <textarea class="md-textarea" id="md-textarea" placeholder="Notes en Markdown…" spellcheck="false"></textarea>
-          <div id="wy-save-status"></div>
-        </div>`;
+        <div id="wysiwyg-editor" style="margin-top:8px;border:1px solid var(--border);border-radius:var(--r-sm)"></div>
+        <div id="wy-save-status"></div>`;
 
       const noteCard = card('Suivi & notes', '#4f46e5', notesHTML, 'notes');
 
@@ -1663,24 +1845,31 @@
       if (currentStatus === 'done' && doneDateStr) { dateBadge.textContent = doneDateStr; dateBadge.style.display = ''; } else dateBadge.style.display = 'none';
       headLabel.after(dateBadge);
 
-      const mdWrap = noteCard.querySelector('#md-editor-wrap'), mdPreview = noteCard.querySelector('#md-preview');
-      const mdTextarea = noteCard.querySelector('#md-textarea'), saveStatus = noteCard.querySelector('#wy-save-status');
-      const picker = noteCard.querySelector('#status-picker'), mdToolbar = noteCard.querySelector('#md-toolbar');
+      ensureToastAssets();
 
-      function renderPreview(md) { mdPreview.innerHTML = mdToHtml(md || ''); }
-      const _initMd = getNotes(sddN); mdTextarea.value = _initMd; renderPreview(_initMd);
+      const saveStatus = noteCard.querySelector('#wy-save-status');
+      const picker = noteCard.querySelector('#status-picker');
+      const editorRoot = noteCard.querySelector('#wysiwyg-editor');
 
-      function enterEdit() { if (mdWrap.classList.contains('editing')) return; mdWrap.classList.add('editing'); mdTextarea.focus(); const len = mdTextarea.value.length; mdTextarea.setSelectionRange(len, len); }
-      function exitEdit()  { if (!mdWrap.classList.contains('editing')) return; mdWrap.classList.remove('editing'); saveNow(); renderPreview(mdTextarea.value); }
-
-      mdPreview.addEventListener('click', enterEdit);
-      mdWrap.addEventListener('click', e => { if (!mdWrap.classList.contains('editing')) enterEdit(); });
-      mdTextarea.addEventListener('blur', () => { setTimeout(exitEdit, 150); });
+      let editor = null;
+      let _saveTimer = null;
 
       function applyStatus(st) {
-        picker.querySelectorAll('.status-btn').forEach(btn => { btn.classList.remove('active-todo', 'active-inprogress', 'active-done'); if (btn.dataset.st === st) btn.classList.add('active-' + st); });
-        const dd = getDoneDate(sddN), ddStr = dd ? formatDoneDate(dd) : '', badge = noteCard.querySelector('#notes-date-badge');
-        if (st === 'done' && ddStr) { badge.textContent = ddStr; badge.style.display = ''; } else badge.style.display = 'none';
+        picker.querySelectorAll('.status-btn').forEach(btn => {
+          btn.classList.remove('active-todo', 'active-inprogress', 'active-done');
+          if (btn.dataset.st === st) btn.classList.add('active-' + st);
+        });
+
+        const dd = getDoneDate(sddN);
+        const ddStr = dd ? formatDoneDate(dd) : '';
+        const badge = noteCard.querySelector('#notes-date-badge');
+
+        if (st === 'done' && ddStr) {
+          badge.textContent = ddStr;
+          badge.style.display = '';
+        } else {
+          badge.style.display = 'none';
+        }
       }
       applyStatus(currentStatus);
 
@@ -1693,40 +1882,127 @@
         });
       });
 
-      let _saveTimer = null;
-      function saveNow() {
-        const md = mdTextarea.value; setNotes(sddN, md); publicNoteMirrorPush(sddN, md).catch(() => {});
-        saveStatus.textContent = 'Sauvé ✓'; clearTimeout(saveNow._flash); saveNow._flash = setTimeout(() => { saveStatus.textContent = ''; }, 1800);
+      function getEditorMarkdown() {
+        if (!editor) return getNotes(sddN) || '';
+        try {
+          return editor.getMarkdown();
+        } catch (_) {
+          return getNotes(sddN) || '';
+        }
       }
-      mdTextarea.addEventListener('input', () => { saveStatus.textContent = '…'; clearTimeout(_saveTimer); _saveTimer = setTimeout(saveNow, CFG.autosaveDelay); });
 
-      function mdInline(marker) {
-        const ta = mdTextarea, s = ta.selectionStart, e2 = ta.selectionEnd, val = ta.value, len = marker.length;
-        const sel = val.slice(s, e2);
-        if (val.slice(s - len, s) === marker && val.slice(e2, e2 + len) === marker) { ta.value = val.slice(0, s - len) + sel + val.slice(e2 + len); ta.selectionStart = s - len; ta.selectionEnd = e2 - len; }
-        else { ta.value = val.slice(0, s) + marker + sel + marker + val.slice(e2); ta.selectionStart = s + len; ta.selectionEnd = e2 + len; }
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      function saveNow() {
+        try {
+          const md = getEditorMarkdown();
+          setNotes(sddN, md);
+          publicNoteMirrorPush(sddN, md).catch(() => {});
+          saveStatus.textContent = 'Sauvé ✓';
+          clearTimeout(saveNow._flash);
+          saveNow._flash = setTimeout(() => {
+            saveStatus.textContent = '';
+          }, 1800);
+        } catch (e) {
+          console.error('[TOAST SAVE]', e);
+          saveStatus.textContent = 'Erreur de sauvegarde';
+          clearTimeout(saveNow._flash);
+          saveNow._flash = setTimeout(() => {
+            saveStatus.textContent = '';
+          }, 2500);
+        }
       }
-      function mdPrefix(prefix) {
-        const ta = mdTextarea, s = ta.selectionStart, val = ta.value, lineStart = val.lastIndexOf('\n', s - 1) + 1;
-        if (val.slice(lineStart, lineStart + prefix.length) === prefix) { ta.value = val.slice(0, lineStart) + val.slice(lineStart + prefix.length); ta.selectionStart = ta.selectionEnd = Math.max(s - prefix.length, lineStart); }
-        else { ta.value = val.slice(0, lineStart) + prefix + val.slice(lineStart); ta.selectionStart = ta.selectionEnd = s + prefix.length; }
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
+
+      function scheduleSave() {
+        saveStatus.textContent = '…';
+        clearTimeout(_saveTimer);
+        _saveTimer = setTimeout(saveNow, CFG.autosaveDelay);
       }
-      mdTextarea.addEventListener('keydown', e => {
-        const mod = e.ctrlKey || e.metaKey;
-        if (mod && /^[sS]$/.test(e.key)) { e.preventDefault(); saveNow(); return; }
-        if (mod && /^[bB]$/.test(e.key)) { e.preventDefault(); mdInline('**'); return; }
-        if (mod && /^[iI]$/.test(e.key)) { e.preventDefault(); mdInline('*'); return; }
-        if (mod && /^[uU]$/.test(e.key)) { e.preventDefault(); mdInline('__'); return; }
-        if (e.key === 'Tab')    { e.preventDefault(); const s = mdTextarea.selectionStart, e2 = mdTextarea.selectionEnd; mdTextarea.value = mdTextarea.value.slice(0, s) + '  ' + mdTextarea.value.slice(e2); mdTextarea.selectionStart = mdTextarea.selectionEnd = s + 2; }
-        if (e.key === 'Escape') { e.preventDefault(); exitEdit(); }
-      });
-      mdToolbar && mdToolbar.addEventListener('mousedown', e => {
-        const btn = e.target.closest('.md-tb-btn'); if (!btn) return; e.preventDefault();
-        const md = btn.dataset.md || '';
-        btn.hasAttribute('data-line') ? mdPrefix(md) : mdInline(md);
-      });
+
+      const initialMd = getNotes(sddN) || '';
+
+      try {
+        editor = new toastui.Editor({
+          el: editorRoot,
+          initialValue: initialMd,
+          initialEditType: 'wysiwyg',
+          previewStyle: 'vertical',
+          height: 'auto',
+          usageStatistics: false,
+          hideModeSwitch: true,
+          toolbarItems: [
+            ['heading', 'bold', 'italic', 'strike'],
+            ['hr', 'quote'],
+            ['ul', 'ol', 'task'],
+            ['table', 'link'],
+            ['code', 'codeblock']
+          ]
+        });
+
+        editor.on('change', () => {
+          scheduleSave();
+        });
+
+        // Tab / Shift+Tab : indent/dedent dans les listes
+        editorRoot.addEventListener('keydown', e => {
+          if (e.key === 'Tab') {
+            const wwEl = editorRoot.querySelector('.toastui-editor-ww-container .ProseMirror');
+            if (wwEl) {
+              // Laisse ProseMirror gérer si on est dans une liste
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount) {
+                const node = sel.getRangeAt(0).startContainer;
+                const inList = node.nodeType === 3
+                  ? node.parentElement?.closest('li')
+                  : node.closest?.('li');
+                if (inList) {
+                  e.preventDefault();
+                  if (e.shiftKey) {
+                    editor.exec('outdentList');
+                  } else {
+                    editor.exec('indentList');
+                  }
+                  return;
+                }
+              }
+            }
+          }
+          const mod = e.ctrlKey || e.metaKey;
+          if (mod && /^[sS]$/.test(e.key)) {
+            e.preventDefault();
+            saveNow();
+          }
+        });
+
+        // Sécurité supplémentaire : sauvegarde quand on quitte la page / perd le focus
+        window.addEventListener('beforeunload', () => {
+          try { saveNow(); } catch (_) {}
+        });
+
+      } catch (e) {
+        console.error('[TOAST INIT]', e);
+        editorRoot.innerHTML = `
+          <div style="border:1px solid var(--danger);background:var(--danger-light);color:var(--danger);padding:10px 12px;border-radius:var(--r-sm);font-size:12px">
+            Impossible d’initialiser l’éditeur WYSIWYG.
+          </div>
+          <textarea id="toast-fallback-textarea" style="width:100%;min-height:220px;margin-top:8px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);font:12px ui-monospace,monospace">${escapeHtml(initialMd)}</textarea>
+        `;
+
+        const fallback = editorRoot.querySelector('#toast-fallback-textarea');
+        fallback.addEventListener('input', () => {
+          saveStatus.textContent = '…';
+          clearTimeout(_saveTimer);
+          _saveTimer = setTimeout(() => {
+            const md = fallback.value;
+            setNotes(sddN, md);
+            publicNoteMirrorPush(sddN, md).catch(() => {});
+            saveStatus.textContent = 'Sauvé ✓';
+            clearTimeout(saveNow._flash);
+            saveNow._flash = setTimeout(() => {
+              saveStatus.textContent = '';
+            }, 1800);
+          }, CFG.autosaveDelay);
+        });
+      }
+
       follow.appendChild(noteCard);
     }
 
