@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      13.0
-// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS + Point rouge ECOS + Filtre ECOS + Checkbox station faite + Notation /5 + Haptics mobile
+// @version      14.0
+// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS + Point rouge ECOS + Filtre ECOS + Checkbox station faite + Notation /5 + Haptics mobile + ECOS Scoring Panel + Performance globale + Historique par matière
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
 // @match        https://livret.uness.fr/lisa/2025/Cat*gorie:Situation_de_d*part
@@ -204,6 +204,66 @@
   const ECOS_PRESENCE_KEY    = 'uness_ecos_presence_v1';
   const ECOS_PRESENCE_TS_KEY = 'uness_ecos_presence_ts_v1';
   const ECOS_DONE_PREFIX     = 'uness_ecos_done_v1_';
+  const ECOS_SCORES_PREFIX   = 'uness_ecos_scores_v1_';
+
+  // ── ECOS Scoring — Firestore persistence ──
+  async function saveEcosScore(sddN, fileId, scoreData) {
+    // scoreData: { gridScore, gridTotal, performance, finalScore, matiere, sddName, fileName, date }
+    const tok = await cloudEnsureSession(); if (!tok) throw new Error('Non authentifié');
+    const docId = `${sddN}_${fileId}`;
+    const url = `${firestoreBase()}/users/${encodeURIComponent(tok.uid)}/ecosScores/${docId}`;
+    const fields = {};
+    for (const [k, v] of Object.entries(scoreData)) {
+      if (typeof v === 'number') fields[k] = { doubleValue: v };
+      else if (typeof v === 'string') fields[k] = { stringValue: v };
+    }
+    fields.sddN = { integerValue: String(sddN) };
+    fields.fileId = { stringValue: fileId };
+    fields.updatedAt = { integerValue: String(Date.now()) };
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok.idToken}` },
+      body: JSON.stringify({ fields }),
+    });
+    if (!r.ok) throw new Error(`Score save HTTP ${r.status}`);
+  }
+
+  async function loadEcosScore(sddN, fileId) {
+    const tok = await cloudEnsureSession(); if (!tok) return null;
+    const docId = `${sddN}_${fileId}`;
+    const url = `${firestoreBase()}/users/${encodeURIComponent(tok.uid)}/ecosScores/${docId}`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${tok.idToken}` } });
+    if (r.status === 404) return null;
+    if (!r.ok) return null;
+    const doc = await r.json().catch(() => ({}));
+    const f = doc?.fields || {};
+    const out = {};
+    for (const [k, fv] of Object.entries(f)) {
+      if (fv.doubleValue != null) out[k] = Number(fv.doubleValue);
+      else if (fv.integerValue != null) out[k] = Number(fv.integerValue);
+      else if (fv.stringValue != null) out[k] = fv.stringValue;
+    }
+    return out;
+  }
+
+  async function loadAllEcosScores() {
+    const tok = await cloudEnsureSession(); if (!tok) return [];
+    const url = `${firestoreBase()}/users/${encodeURIComponent(tok.uid)}/ecosScores`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${tok.idToken}` } });
+    if (!r.ok) return [];
+    const json = await r.json().catch(() => ({}));
+    const docs = json.documents || [];
+    return docs.map(doc => {
+      const f = doc?.fields || {};
+      const out = {};
+      for (const [k, fv] of Object.entries(f)) {
+        if (fv.doubleValue != null) out[k] = Number(fv.doubleValue);
+        else if (fv.integerValue != null) out[k] = Number(fv.integerValue);
+        else if (fv.stringValue != null) out[k] = fv.stringValue;
+      }
+      return out;
+    });
+  }
 
   const pad3        = (n) => String(parseInt(n, 10)).padStart(3, '0');
   const doneKey     = (n) => DONE_PREFIX      + pad3(n);
@@ -856,7 +916,7 @@
       #btn-ecos-random{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:color var(--transition),border-color var(--transition)}
       #btn-ecos-random:hover{color:#7c3aed;border-color:#7c3aed}
       #ecos-preview-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
-      #ecos-preview-panel{width:min(900px,95vw);height:90vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+      #ecos-preview-panel{width:min(1200px,96vw);height:92vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
       #ecos-preview-head{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:var(--fs-small);font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff;flex-wrap:wrap}
       #ecos-preview-head .pv-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
       #ecos-preview-head a.pv-btn{font-size:var(--fs-tiny);color:var(--text2);font-weight:var(--fw-semi);text-decoration:none;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);white-space:nowrap;transition:border-color var(--transition),color var(--transition);background:var(--surface2)} #ecos-preview-head a.pv-btn:hover{border-color:var(--ac);color:var(--ac)}
@@ -864,10 +924,67 @@
       #ecos-preview-rating{display:flex;align-items:center;gap:2px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface2);flex-shrink:0}
       #ecos-preview-rating .pr-star{font-size:15px;cursor:pointer;color:var(--border2);transition:color .1s,transform .1s;line-height:1;user-select:none} #ecos-preview-rating .pr-star:hover,#ecos-preview-rating .pr-star.filled{color:#f59e0b;transform:scale(1.15)}
       #ecos-preview-rating .pr-info{font-size:10px;color:var(--muted);margin-left:4px;white-space:nowrap}
-      #ecos-timer{display:flex;align-items:center;gap:6px;font-size:var(--fs-tiny);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums;color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:3px 8px;background:var(--surface2);flex-shrink:0}
-      #ecos-timer button{background:none;border:none;cursor:pointer;font-size:13px;padding:0 2px;color:var(--muted);line-height:1}
-      #ecos-timer button:hover{color:var(--text)}
-      #ecos-preview-iframe{flex:1;border:none;width:100%}
+      /* Split layout */
+      #ecos-preview-split{flex:1;display:flex;overflow:hidden}
+      #ecos-preview-iframe{flex:1;border:none;min-width:0}
+      #ecos-scoring-panel{width:320px;flex-shrink:0;border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;background:var(--surface2)}
+      /* Timer */
+      .ecos-timer-wrap{padding:14px 16px;border-bottom:1px solid var(--border);background:#fff}
+      .ecos-timer-phase{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+      .ecos-timer-phase .phase-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+      .ecos-timer-phase .phase-dot.active{background:var(--success);animation:pulse-dot 1.5s ease infinite}
+      .ecos-timer-phase .phase-dot.idle{background:var(--border2)}
+      @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+      .ecos-timer-display{font-size:36px;font-weight:var(--fw-heavy);font-variant-numeric:tabular-nums;letter-spacing:-1px;line-height:1;color:var(--text)}
+      .ecos-timer-display.warning{color:var(--warning)}
+      .ecos-timer-display.danger{color:var(--danger)}
+      .ecos-timer-bar{height:3px;background:var(--border);border-radius:999px;margin-top:8px;overflow:hidden}
+      .ecos-timer-bar-fill{height:100%;border-radius:999px;background:var(--ac);transition:width .3s linear}
+      .ecos-timer-bar-fill.warning{background:var(--warning)}
+      .ecos-timer-bar-fill.danger{background:var(--danger)}
+      .ecos-timer-controls{display:flex;gap:6px;margin-top:10px}
+      .ecos-timer-btn{flex:1;padding:6px 0;border:1px solid var(--border);border-radius:var(--r-sm);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;color:var(--text2);transition:all var(--transition)}
+      .ecos-timer-btn:hover{border-color:var(--ac);color:var(--ac)}
+      .ecos-timer-btn.primary{background:var(--ac);border-color:var(--ac);color:#fff}
+      .ecos-timer-btn.primary:hover{background:var(--ac-dark)}
+      /* Scoring */
+      .ecos-scoring-section{padding:14px 16px;border-bottom:1px solid var(--border);background:#fff}
+      .ecos-scoring-title{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:10px}
+      .ecos-grid-config{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+      .ecos-grid-config label{font-size:var(--fs-tiny);color:var(--text2);font-weight:var(--fw-semi)}
+      .ecos-grid-config input{width:50px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:var(--fs-tiny);font-family:inherit;text-align:center;color:var(--text);outline:none}
+      .ecos-grid-config input:focus{border-color:var(--ac)}
+      .ecos-grid-points{display:flex;flex-wrap:wrap;gap:5px}
+      .ecos-point-btn{width:32px;height:32px;border-radius:var(--r-sm);border:1.5px solid var(--border);background:#fff;color:var(--muted);font-size:var(--fs-tiny);font-weight:var(--fw-bold);font-family:inherit;cursor:pointer;display:grid;place-items:center;transition:all .12s ease}
+      .ecos-point-btn:hover{border-color:var(--ac);color:var(--ac)}
+      .ecos-point-btn.earned{background:var(--ac);border-color:var(--ac);color:#fff}
+      .ecos-grid-score{margin-top:10px;display:flex;align-items:baseline;gap:4px}
+      .ecos-grid-score-val{font-size:22px;font-weight:var(--fw-heavy);color:var(--text)}
+      .ecos-grid-score-total{font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)}
+      /* Performance */
+      .ecos-perf-btns{display:flex;gap:6px}
+      .ecos-perf-btn{flex:1;padding:8px 4px;border:1.5px solid var(--border);border-radius:var(--r-sm);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;text-align:center;color:var(--text2);transition:all .12s ease}
+      .ecos-perf-btn:hover{border-color:var(--ac)}
+      .ecos-perf-btn.selected-0{background:var(--danger-light);border-color:var(--danger);color:var(--danger)}
+      .ecos-perf-btn.selected-1{background:var(--warning-light);border-color:var(--warning);color:#92400e}
+      .ecos-perf-btn.selected-2{background:#dbeafe;border-color:#3b82f6;color:#1d4ed8}
+      .ecos-perf-btn.selected-3{background:var(--success-light);border-color:var(--success);color:#065f46}
+      /* Final score */
+      .ecos-final-score{padding:16px;background:#fff;border-top:1px solid var(--border);margin-top:auto}
+      .ecos-final-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:var(--fs-tiny);color:var(--text2)}
+      .ecos-final-row-val{font-weight:var(--fw-bold);color:var(--text)}
+      .ecos-final-divider{height:1px;background:var(--border);margin:10px 0}
+      .ecos-final-total{display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-base);font-weight:var(--fw-heavy);color:var(--text)}
+      .ecos-final-total-val{font-size:22px;color:var(--ac)}
+      .ecos-final-save{width:100%;margin-top:12px;padding:8px;border:none;border-radius:var(--r-sm);background:var(--ac);color:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-bold);cursor:pointer;transition:background var(--transition)}
+      .ecos-final-save:hover{background:var(--ac-dark)}
+      .ecos-final-save:disabled{opacity:.4;pointer-events:none}
+      .ecos-final-save.saved{background:var(--success)}
+      /* SDD link */
+      .ecos-sdd-link{display:flex;align-items:center;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border);background:#fff;font-size:var(--fs-tiny);text-decoration:none;color:var(--ac);font-weight:var(--fw-semi);transition:background var(--transition)}
+      .ecos-sdd-link:hover{background:var(--ac-light)}
+      @media(max-width:800px){#ecos-scoring-panel{width:260px}}
+      @media(max-width:640px){#ecos-preview-split{flex-direction:column}#ecos-scoring-panel{width:100%;max-height:50vh;border-left:none;border-top:1px solid var(--border)}}
       </style>`;
 
     document.body.innerHTML = '';
@@ -1071,11 +1188,56 @@
       }
       const backdrop = document.createElement('div');
       backdrop.id = 'stats-backdrop';
-      backdrop.innerHTML = `<div id="stats-panel"><div id="stats-panel-head">📊 Statistiques &amp; Progression<button id="stats-close" title="Fermer">✕</button></div><div id="stats-panel-body"><div class="stats-counters"><div class="stat-box"><div class="stat-box-val" style="color:var(--success)">${doneCount}</div><div class="stat-box-lbl">Faites</div></div><div class="stat-box"><div class="stat-box-val" style="color:#fb923c">${inpCount}</div><div class="stat-box-lbl">En cours</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--muted)">${total - doneCount - inpCount}</div><div class="stat-box-lbl">À faire</div></div><div class="stat-box"><div class="stat-box-val">${Math.round(doneCount / total * 100)}%</div><div class="stat-box-lbl">Progression</div></div><div class="stat-box"><div class="stat-box-val" style="color:#d97706">${reviewDue}</div><div class="stat-box-lbl">À réviser</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--ac)">${total}</div><div class="stat-box-lbl">Total SDD</div></div></div><div class="stats-streak"><div class="streak-fire">🔥</div><div><div class="streak-val">${streak} jour${streak !== 1 ? 's' : ''}</div><div class="streak-lbl">Streak actuel</div></div></div><div><div class="stats-section-title">Heatmap — 12 derniers mois</div>${heatHTML}</div><div><div class="stats-section-title">Progression par spécialité</div>${barsHTML}</div></div></div>`;
+      backdrop.innerHTML = `<div id="stats-panel"><div id="stats-panel-head">📊 Statistiques &amp; Progression<button id="stats-close" title="Fermer">✕</button></div><div id="stats-panel-body"><div class="stats-counters"><div class="stat-box"><div class="stat-box-val" style="color:var(--success)">${doneCount}</div><div class="stat-box-lbl">Faites</div></div><div class="stat-box"><div class="stat-box-val" style="color:#fb923c">${inpCount}</div><div class="stat-box-lbl">En cours</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--muted)">${total - doneCount - inpCount}</div><div class="stat-box-lbl">À faire</div></div><div class="stat-box"><div class="stat-box-val">${Math.round(doneCount / total * 100)}%</div><div class="stat-box-lbl">Progression</div></div><div class="stat-box"><div class="stat-box-val" style="color:#d97706">${reviewDue}</div><div class="stat-box-lbl">À réviser</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--ac)">${total}</div><div class="stat-box-lbl">Total SDD</div></div></div><div class="stats-streak"><div class="streak-fire">🔥</div><div><div class="streak-val">${streak} jour${streak !== 1 ? 's' : ''}</div><div class="streak-lbl">Streak actuel</div></div></div><div><div class="stats-section-title">Heatmap — 12 derniers mois</div>${heatHTML}</div><div><div class="stats-section-title">Progression par spécialité</div>${barsHTML}</div><div id="ecos-scores-section"><div class="stats-section-title">Notes ECOS par matière</div><div id="ecos-scores-content" style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px"><div style="width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite"></div>Chargement…</div></div></div></div>`;
       document.body.appendChild(backdrop);
       backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
       backdrop.querySelector('#stats-close').addEventListener('click', () => backdrop.remove());
       document.addEventListener('keydown', function onEsc(e) { if (e.key === 'Escape') { backdrop.remove(); document.removeEventListener('keydown', onEsc); } });
+
+      // Load ECOS scores
+      if (cloudEnabled()) {
+        loadAllEcosScores().then(scores => {
+          const container = backdrop.querySelector('#ecos-scores-content');
+          if (!container) return;
+          if (!scores.length) { container.innerHTML = '<p style="color:var(--muted);font-size:12px;font-style:italic">Aucune note ECOS enregistrée.</p>'; return; }
+          // Group by matière
+          const byMat = {};
+          for (const s of scores) {
+            const mat = s.matiere || 'Non classée';
+            if (!byMat[mat]) byMat[mat] = [];
+            byMat[mat].push(s);
+          }
+          let html = '';
+          const sortedMats = Object.entries(byMat).sort((a, b) => a[0].localeCompare(b[0], 'fr'));
+          for (const [mat, matScores] of sortedMats) {
+            const avg = matScores.reduce((sum, s) => sum + (s.finalScore || 0), 0) / matScores.length;
+            const tc = getFamilyColor(mat);
+            html += `<div style="margin-bottom:12px">`;
+            html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;background:${tc.pill};color:${tc.text}">${escapeHtml(mat)}</span><span style="font-size:11px;color:var(--muted)">${matScores.length} station${matScores.length > 1 ? 's' : ''} · Moy. <strong style="color:var(--text)">${avg.toFixed(1)}/20</strong></span></div>`;
+            html += `<div style="display:flex;flex-direction:column;gap:3px">`;
+            matScores.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+            for (const s of matScores) {
+              const dateStr = s.date ? new Date(s.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '';
+              const barPct = Math.round(((s.finalScore || 0) / 20) * 100);
+              const barColor = barPct >= 75 ? 'var(--success)' : barPct >= 50 ? 'var(--warning)' : 'var(--danger)';
+              html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)">`;
+              html += `<span style="width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0" title="${escapeHtml(s.fileName || s.sddName || '')}">${escapeHtml(s.sddName || s.fileName || '—')}</span>`;
+              html += `<div style="flex:1;height:6px;background:var(--border);border-radius:999px;overflow:hidden"><div style="height:100%;width:${barPct}%;border-radius:999px;background:${barColor};transition:width .3s"></div></div>`;
+              html += `<span style="width:44px;text-align:right;font-weight:600;flex-shrink:0">${(s.finalScore || 0).toFixed(1)}</span>`;
+              html += `<span style="width:50px;text-align:right;color:var(--muted);flex-shrink:0">${dateStr}</span>`;
+              html += `</div>`;
+            }
+            html += `</div></div>`;
+          }
+          container.innerHTML = html;
+        }).catch(() => {
+          const container = backdrop.querySelector('#ecos-scores-content');
+          if (container) container.innerHTML = '<p style="color:var(--danger);font-size:12px">⚠ Erreur de chargement</p>';
+        });
+      } else {
+        const container = backdrop.querySelector('#ecos-scores-content');
+        if (container) container.innerHTML = '<p style="color:var(--muted);font-size:12px;font-style:italic">Connectez le cloud pour voir les notes ECOS.</p>';
+      }
     }
 
     document.getElementById('btn-stats').addEventListener('click', buildStatsModal);
@@ -1206,7 +1368,7 @@
       .ecos-upload-btn.cancel{background:transparent;color:var(--muted);border:1px solid var(--border)} .ecos-upload-btn.cancel:hover{color:var(--text);border-color:var(--border2)}
       /* Preview PDF */
       #ecos-preview-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
-      #ecos-preview-panel{width:min(900px,95vw);height:90vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+      #ecos-preview-panel{width:min(1200px,96vw);height:92vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
       #ecos-preview-head{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:var(--fs-small);font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff;flex-wrap:wrap}
       #ecos-preview-head .pv-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
       #ecos-preview-head a.pv-btn{font-size:var(--fs-tiny);color:var(--text2);font-weight:var(--fw-semi);text-decoration:none;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);white-space:nowrap;transition:border-color var(--transition),color var(--transition);background:var(--surface2)} #ecos-preview-head a.pv-btn:hover{border-color:var(--ac);color:var(--ac)}
@@ -1215,7 +1377,57 @@
       #ecos-preview-rating{display:flex;align-items:center;gap:2px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface2);flex-shrink:0}
       #ecos-preview-rating .pr-star{font-size:15px;cursor:pointer;color:var(--border2);transition:color .1s,transform .1s;line-height:1;user-select:none} #ecos-preview-rating .pr-star:hover,#ecos-preview-rating .pr-star.filled{color:#f59e0b;transform:scale(1.15)}
       #ecos-preview-rating .pr-info{font-size:10px;color:var(--muted);margin-left:4px;white-space:nowrap}
-      #ecos-preview-iframe{flex:1;border:none;width:100%}
+      #ecos-preview-iframe{flex:1;border:none;width:100%;min-width:0}
+      #ecos-preview-split{flex:1;display:flex;overflow:hidden}
+      #ecos-scoring-panel{width:320px;flex-shrink:0;border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;background:var(--surface2)}
+      @media(max-width:800px){#ecos-scoring-panel{width:260px}}
+      @media(max-width:640px){#ecos-preview-split{flex-direction:column}#ecos-scoring-panel{width:100%;max-height:50vh;border-left:none;border-top:1px solid var(--border)}}
+      /* Timer & Scoring for SDD page */
+      .ecos-timer-wrap{padding:14px 16px;border-bottom:1px solid var(--border);background:#fff}
+      .ecos-timer-phase{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+      .ecos-timer-phase .phase-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+      .ecos-timer-phase .phase-dot.active{background:var(--success);animation:pulse-dot 1.5s ease infinite}
+      .ecos-timer-phase .phase-dot.idle{background:var(--border2)}
+      @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+      .ecos-timer-display{font-size:36px;font-weight:var(--fw-heavy);font-variant-numeric:tabular-nums;letter-spacing:-1px;line-height:1;color:var(--text)}
+      .ecos-timer-display.warning{color:var(--warning)}.ecos-timer-display.danger{color:var(--danger)}
+      .ecos-timer-bar{height:3px;background:var(--border);border-radius:999px;margin-top:8px;overflow:hidden}
+      .ecos-timer-bar-fill{height:100%;border-radius:999px;background:var(--ac);transition:width .3s linear}
+      .ecos-timer-bar-fill.warning{background:var(--warning)}.ecos-timer-bar-fill.danger{background:var(--danger)}
+      .ecos-timer-controls{display:flex;gap:6px;margin-top:10px}
+      .ecos-timer-btn{flex:1;padding:6px 0;border:1px solid var(--border);border-radius:var(--r-sm);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;color:var(--text2);transition:all var(--transition)}
+      .ecos-timer-btn:hover{border-color:var(--ac);color:var(--ac)}
+      .ecos-timer-btn.primary{background:var(--ac);border-color:var(--ac);color:#fff}.ecos-timer-btn.primary:hover{background:var(--ac-dark)}
+      .ecos-scoring-section{padding:14px 16px;border-bottom:1px solid var(--border);background:#fff}
+      .ecos-scoring-title{font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:10px}
+      .ecos-grid-config{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+      .ecos-grid-config label{font-size:var(--fs-tiny);color:var(--text2);font-weight:var(--fw-semi)}
+      .ecos-grid-config input{width:50px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:var(--fs-tiny);font-family:inherit;text-align:center;color:var(--text);outline:none}
+      .ecos-grid-config input:focus{border-color:var(--ac)}
+      .ecos-grid-points{display:flex;flex-wrap:wrap;gap:5px}
+      .ecos-point-btn{width:32px;height:32px;border-radius:var(--r-sm);border:1.5px solid var(--border);background:#fff;color:var(--muted);font-size:var(--fs-tiny);font-weight:var(--fw-bold);font-family:inherit;cursor:pointer;display:grid;place-items:center;transition:all .12s ease}
+      .ecos-point-btn:hover{border-color:var(--ac);color:var(--ac)}
+      .ecos-point-btn.earned{background:var(--ac);border-color:var(--ac);color:#fff}
+      .ecos-grid-score{margin-top:10px;display:flex;align-items:baseline;gap:4px}
+      .ecos-grid-score-val{font-size:22px;font-weight:var(--fw-heavy);color:var(--text)}
+      .ecos-grid-score-total{font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)}
+      .ecos-perf-btns{display:flex;gap:6px}
+      .ecos-perf-btn{flex:1;padding:8px 4px;border:1.5px solid var(--border);border-radius:var(--r-sm);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;text-align:center;color:var(--text2);transition:all .12s ease}
+      .ecos-perf-btn:hover{border-color:var(--ac)}
+      .ecos-perf-btn.selected-0{background:var(--danger-light);border-color:var(--danger);color:var(--danger)}
+      .ecos-perf-btn.selected-1{background:var(--warning-light);border-color:var(--warning);color:#92400e}
+      .ecos-perf-btn.selected-2{background:#dbeafe;border-color:#3b82f6;color:#1d4ed8}
+      .ecos-perf-btn.selected-3{background:var(--success-light);border-color:var(--success);color:#065f46}
+      .ecos-final-score{padding:16px;background:#fff;border-top:1px solid var(--border);margin-top:auto}
+      .ecos-final-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:var(--fs-tiny);color:var(--text2)}
+      .ecos-final-row-val{font-weight:var(--fw-bold);color:var(--text)}
+      .ecos-final-divider{height:1px;background:var(--border);margin:10px 0}
+      .ecos-final-total{display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-base);font-weight:var(--fw-heavy);color:var(--text)}
+      .ecos-final-total-val{font-size:22px;color:var(--ac)}
+      .ecos-final-save{width:100%;margin-top:12px;padding:8px;border:none;border-radius:var(--r-sm);background:var(--ac);color:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-bold);cursor:pointer;transition:background var(--transition)}
+      .ecos-final-save:hover{background:var(--ac-dark)}.ecos-final-save:disabled{opacity:.4;pointer-events:none}.ecos-final-save.saved{background:var(--success)}
+      .ecos-sdd-link{display:flex;align-items:center;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border);background:#fff;font-size:var(--fs-tiny);text-decoration:none;color:var(--ac);font-weight:var(--fw-semi);transition:background var(--transition)}
+      .ecos-sdd-link:hover{background:var(--ac-light)}
       @keyframes spin{to{transform:rotate(360deg)}}
       @media(max-width:${CFG.breakpointOneCol}px){#sdd-bc,#sdd-top{padding-left:14px;padding-right:14px}#sdd-body{grid-template-columns:1fr;padding-left:14px;padding-right:14px}#sdd-follow{position:static;max-height:none;overflow-y:visible}#sdd-top{flex-wrap:wrap}#sdd-top-title{font-size:20px}#sdd-top-back{order:-1;width:100%}}
     `;
@@ -1309,54 +1521,268 @@
   // ══════════════════════════════════════════════════════════════════════════
   // ECOS — Preview PDF
   // ══════════════════════════════════════════════════════════════════════════
-  function openEcosPreviewWithTimer(file, sddN, sddName) {
-    // Appelle openEcosPreview standard puis injecte timer + label SDD
-    openEcosPreview(file, null, sddN, null);
-    const head = document.querySelector('#ecos-preview-head');
-    if (!head) return;
-    // Label SDD
-    const title = head.querySelector('.pv-title');
-    if (title && sddName) title.title = sddName + ' — ' + (file?.name || '');
+  // ══════════════════════════════════════════════════════════════════════════
+  // ECOS — Preview PDF with Scoring Panel (v14)
+  // ══════════════════════════════════════════════════════════════════════════
 
-    // Timer 8 min
-    const TOTAL = 8 * 60;
-    let remaining = TOTAL, timerInterval = null, running = false;
-    const timerEl = document.createElement('div'); timerEl.id = 'ecos-timer';
-    timerEl.innerHTML = '<span id="ecos-timer-display">8:00</span><button id="ecos-timer-start" title="Démarrer">▶</button><button id="ecos-timer-reset" title="Réinitialiser">↺</button>';
-    const closeBtn = head.querySelector('#ecos-preview-close');
-    head.insertBefore(timerEl, closeBtn);
-
-    const display = timerEl.querySelector('#ecos-timer-display');
-    const btnStart = timerEl.querySelector('#ecos-timer-start');
-    const btnReset = timerEl.querySelector('#ecos-timer-reset');
-    const fmt = s => Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
-    const tick = () => {
-      remaining--;
-      display.textContent = fmt(remaining);
-      if (remaining <= 60) display.style.color = 'var(--danger)';
-      if (remaining <= 0) { clearInterval(timerInterval); running = false; btnStart.textContent = '▶'; haptic?.('warning'); }
-    };
-    btnStart.addEventListener('click', () => {
-      if (running) { clearInterval(timerInterval); running = false; btnStart.textContent = '▶'; }
-      else if (remaining > 0) { timerInterval = setInterval(tick, 1000); running = true; btnStart.textContent = '⏸'; haptic?.('selection'); }
-    });
-    btnReset.addEventListener('click', () => {
-      clearInterval(timerInterval); running = false; remaining = TOTAL;
-      display.textContent = fmt(TOTAL); display.style.color = ''; btnStart.textContent = '▶';
-    });
-    // Cleanup on close
-    const backdrop = document.getElementById('ecos-preview-backdrop');
-    if (backdrop) {
-      const origClose = backdrop.querySelector('#ecos-preview-close');
-      origClose?.addEventListener('click', () => clearInterval(timerInterval), { once: true });
-    }
+  function buildScoringPanelHTML(sddN, sddName, file, sddHref) {
+    const tags = SDD_TAGS[sddN] || [];
+    const matiere = tags[0] || 'Non classée';
+    return `
+      ${sddHref ? `<a class="ecos-sdd-link" href="${escapeHtml(sddHref)}" target="_blank">📘 Accéder à la page SDD — ${escapeHtml(sddName || 'SDD-' + sddN)}</a>` : ''}
+      <div class="ecos-timer-wrap" id="ecos-timer-section">
+        <div class="ecos-timer-phase"><span class="phase-dot idle" id="timer-dot"></span><span id="timer-phase-label">ECOS — 8 min</span></div>
+        <div class="ecos-timer-display" id="timer-display">8:00</div>
+        <div class="ecos-timer-bar"><div class="ecos-timer-bar-fill" id="timer-bar" style="width:100%"></div></div>
+        <div class="ecos-timer-controls">
+          <button class="ecos-timer-btn primary" id="timer-start">▶ Démarrer</button>
+          <button class="ecos-timer-btn" id="timer-reset">↺ Reset</button>
+        </div>
+      </div>
+      <div class="ecos-scoring-section">
+        <div class="ecos-scoring-title">Grille de notation</div>
+        <div class="ecos-grid-config">
+          <label>Total points :</label>
+          <input type="number" id="ecos-grid-total" value="20" min="1" max="100">
+        </div>
+        <div class="ecos-grid-points" id="ecos-grid-points"></div>
+        <div class="ecos-grid-score">
+          <span class="ecos-grid-score-val" id="ecos-grid-val">0</span>
+          <span class="ecos-grid-score-total">/ <span id="ecos-grid-max">20</span></span>
+        </div>
+      </div>
+      <div class="ecos-scoring-section">
+        <div class="ecos-scoring-title">Performance globale /3</div>
+        <div class="ecos-perf-btns">
+          <button class="ecos-perf-btn" data-perf="0">0</button>
+          <button class="ecos-perf-btn" data-perf="1">1</button>
+          <button class="ecos-perf-btn" data-perf="2">2</button>
+          <button class="ecos-perf-btn" data-perf="3">3</button>
+        </div>
+      </div>
+      <div class="ecos-final-score" id="ecos-final-score">
+        <div class="ecos-final-row"><span>Grille ECOS</span><span class="ecos-final-row-val" id="final-grid">0 / 20</span></div>
+        <div class="ecos-final-row"><span>Performance globale</span><span class="ecos-final-row-val" id="final-perf">— / 3</span></div>
+        <div class="ecos-final-divider"></div>
+        <div class="ecos-final-total"><span>Note station</span><span class="ecos-final-total-val" id="final-total">—</span></div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px" id="final-matiere">${escapeHtml(matiere)}</div>
+        <button class="ecos-final-save" id="ecos-save-btn" disabled>💾 Enregistrer la note</button>
+      </div>`;
   }
 
-  function openEcosPreview(file, currentUid, sddN, onDelete) {
+  function initScoringPanel(container, sddN, sddName, file) {
+    const tags = SDD_TAGS[sddN] || [];
+    const matiere = tags[0] || 'Non classée';
+
+    // State
+    let gridTotal = 20, earnedPoints = new Set(), perfScore = -1;
+
+    // Timer state
+    const PHASE_ECOS = 0, PHASE_DEBRIEF = 1, PHASE_DONE = 2;
+    const PHASE_DURATIONS = [8 * 60, 3 * 60];
+    const PHASE_LABELS = ['ECOS — 8 min', 'Débrief — 3 min'];
+    let phase = PHASE_ECOS, remaining = PHASE_DURATIONS[0], timerInterval = null, running = false;
+
+    const timerDisplay = container.querySelector('#timer-display');
+    const timerBar = container.querySelector('#timer-bar');
+    const timerDot = container.querySelector('#timer-dot');
+    const timerPhaseLabel = container.querySelector('#timer-phase-label');
+    const btnStart = container.querySelector('#timer-start');
+    const btnReset = container.querySelector('#timer-reset');
+    const gridContainer = container.querySelector('#ecos-grid-points');
+    const gridValEl = container.querySelector('#ecos-grid-val');
+    const gridMaxEl = container.querySelector('#ecos-grid-max');
+    const gridTotalInput = container.querySelector('#ecos-grid-total');
+    const perfBtns = container.querySelectorAll('.ecos-perf-btn');
+    const finalGrid = container.querySelector('#final-grid');
+    const finalPerf = container.querySelector('#final-perf');
+    const finalTotal = container.querySelector('#final-total');
+    const saveBtn = container.querySelector('#ecos-save-btn');
+
+    const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+
+    // ── Timer ──
+    function updateTimerUI() {
+      timerDisplay.textContent = fmt(remaining);
+      const total = PHASE_DURATIONS[phase] || 1;
+      const pct = Math.max(0, remaining / total * 100);
+      timerBar.style.width = pct + '%';
+
+      // Color classes
+      const ratio = remaining / total;
+      timerDisplay.className = 'ecos-timer-display' + (ratio <= 0.125 ? ' danger' : ratio <= 0.25 ? ' warning' : '');
+      timerBar.className = 'ecos-timer-bar-fill' + (ratio <= 0.125 ? ' danger' : ratio <= 0.25 ? ' warning' : '');
+
+      timerDot.className = 'phase-dot ' + (running ? 'active' : 'idle');
+      timerPhaseLabel.textContent = phase < 2 ? PHASE_LABELS[phase] : 'Terminé';
+    }
+
+    function tick() {
+      remaining--;
+      if (remaining <= 0) {
+        // Phase transition
+        if (phase === PHASE_ECOS) {
+          // Auto-transition to debrief
+          phase = PHASE_DEBRIEF;
+          remaining = PHASE_DURATIONS[1];
+          haptic('warning');
+          // Brief flash effect
+          container.querySelector('.ecos-timer-wrap').style.background = '#fef3c7';
+          setTimeout(() => { container.querySelector('.ecos-timer-wrap').style.background = ''; }, 600);
+        } else {
+          // End
+          clearInterval(timerInterval);
+          running = false;
+          phase = PHASE_DONE;
+          remaining = 0;
+          btnStart.textContent = '✓ Terminé';
+          btnStart.disabled = true;
+          haptic('success');
+        }
+      }
+      updateTimerUI();
+    }
+
+    btnStart.addEventListener('click', () => {
+      if (phase === PHASE_DONE) return;
+      if (running) {
+        clearInterval(timerInterval); running = false;
+        btnStart.textContent = '▶ Reprendre';
+        btnStart.classList.add('primary');
+        timerDot.className = 'phase-dot idle';
+      } else {
+        timerInterval = setInterval(tick, 1000); running = true;
+        btnStart.textContent = '⏸ Pause';
+        btnStart.classList.remove('primary');
+        haptic('selection');
+      }
+      updateTimerUI();
+    });
+
+    btnReset.addEventListener('click', () => {
+      clearInterval(timerInterval); running = false;
+      phase = PHASE_ECOS; remaining = PHASE_DURATIONS[0];
+      btnStart.textContent = '▶ Démarrer'; btnStart.disabled = false; btnStart.classList.add('primary');
+      updateTimerUI();
+    });
+
+    updateTimerUI();
+
+    // ── Grid ──
+    function renderGrid() {
+      gridContainer.innerHTML = '';
+      earnedPoints = new Set([...earnedPoints].filter(p => p <= gridTotal));
+      for (let i = 1; i <= gridTotal; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'ecos-point-btn' + (earnedPoints.has(i) ? ' earned' : '');
+        btn.textContent = i;
+        btn.dataset.point = i;
+        gridContainer.appendChild(btn);
+      }
+      gridMaxEl.textContent = gridTotal;
+      updateScores();
+    }
+
+    gridContainer.addEventListener('click', e => {
+      const btn = e.target.closest('.ecos-point-btn'); if (!btn) return;
+      const p = parseInt(btn.dataset.point, 10);
+      if (earnedPoints.has(p)) { earnedPoints.delete(p); btn.classList.remove('earned'); }
+      else { earnedPoints.add(p); btn.classList.add('earned'); }
+      haptic('selection');
+      updateScores();
+    });
+
+    gridTotalInput.addEventListener('change', () => {
+      const v = parseInt(gridTotalInput.value, 10);
+      if (v > 0 && v <= 100) { gridTotal = v; renderGrid(); }
+    });
+
+    renderGrid();
+
+    // ── Performance ──
+    perfBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = parseInt(btn.dataset.perf, 10);
+        perfScore = perfScore === val ? -1 : val; // Toggle
+        perfBtns.forEach(b => { b.className = 'ecos-perf-btn' + (parseInt(b.dataset.perf, 10) === perfScore ? ' selected-' + perfScore : ''); });
+        haptic('selection');
+        updateScores();
+      });
+    });
+
+    // ── Scores ──
+    function updateScores() {
+      const gridScore = earnedPoints.size;
+      gridValEl.textContent = gridScore;
+      finalGrid.textContent = `${gridScore} / ${gridTotal}`;
+      finalPerf.textContent = perfScore >= 0 ? `${perfScore} / 3` : '— / 3';
+
+      if (perfScore >= 0 && gridTotal > 0) {
+        // Performance as coefficient: grid normalized /20 × (1 + perf/10)
+        const gridNorm = (gridScore / gridTotal) * 20;
+        const finalNote = Math.min(20, Math.round(gridNorm * (1 + perfScore / 10) * 10) / 10);
+        finalTotal.textContent = finalNote.toFixed(1) + ' / 20';
+        saveBtn.disabled = false;
+      } else {
+        finalTotal.textContent = '—';
+        saveBtn.disabled = true;
+      }
+    }
+
+    // ── Save ──
+    saveBtn.addEventListener('click', async () => {
+      if (!cloudEnabled()) return;
+      const gridScore = earnedPoints.size;
+      const gridNorm = (gridScore / gridTotal) * 20;
+      const finalNote = Math.min(20, Math.round(gridNorm * (1 + perfScore / 10) * 10) / 10);
+
+      saveBtn.disabled = true; saveBtn.textContent = '…';
+      try {
+        await saveEcosScore(sddN, file?.id || 'unknown', {
+          gridScore, gridTotal, performance: perfScore, finalScore: finalNote,
+          matiere, sddName: sddName || '', fileName: file?.name || '',
+          date: new Date().toISOString(),
+        });
+        haptic('success');
+        saveBtn.textContent = '✓ Enregistré';
+        saveBtn.classList.add('saved');
+        setTimeout(() => { saveBtn.textContent = '💾 Enregistrer la note'; saveBtn.classList.remove('saved'); saveBtn.disabled = false; }, 2000);
+      } catch (err) {
+        saveBtn.textContent = '⚠ Erreur'; saveBtn.disabled = false;
+        setTimeout(() => { saveBtn.textContent = '💾 Enregistrer la note'; }, 2000);
+      }
+    });
+
+    // ── Load existing score ──
+    if (cloudEnabled() && file?.id) {
+      loadEcosScore(sddN, file.id).then(data => {
+        if (!data) return;
+        if (data.gridTotal) { gridTotal = data.gridTotal; gridTotalInput.value = gridTotal; }
+        if (data.gridScore) { for (let i = 1; i <= data.gridScore; i++) earnedPoints.add(i); }
+        if (data.performance != null && data.performance >= 0) {
+          perfScore = data.performance;
+          perfBtns.forEach(b => { b.className = 'ecos-perf-btn' + (parseInt(b.dataset.perf, 10) === perfScore ? ' selected-' + perfScore : ''); });
+        }
+        renderGrid();
+      }).catch(() => {});
+    }
+
+    // Return cleanup function
+    return () => { clearInterval(timerInterval); };
+  }
+
+  function openEcosPreviewWithTimer(file, sddN, sddName) {
+    // Resolve SDD href
+    const sddHref = `https://livret.uness.fr/lisa/2025/${encodeURIComponent(sddName + ' SDD-' + sddN)}`;
+    openEcosPreviewV14(file, null, sddN, sddName, sddHref, null);
+  }
+
+  function openEcosPreviewV14(file, currentUid, sddN, sddName, sddHref, onDelete) {
     document.getElementById('ecos-preview-backdrop')?.remove();
     const safeUrl = normalizeToFirebaseEndpoint(file?.url);
     const sizeMB = (file?.sizeBytes > 0) ? ` · ${(file.sizeBytes / 1048576).toFixed(1)} Mo` : '';
-    const canDelete = file?.uploadedBy && currentUid && file.uploadedBy === currentUid;
+    const ADMIN_UID = "2ZoVk6EHufhH5EC0tHhWI4l99kh2";
+    const canDelete = currentUid && (file.uploadedBy === currentUid || currentUid === ADMIN_UID);
 
     const backdrop = document.createElement('div'); backdrop.id = 'ecos-preview-backdrop';
     backdrop.innerHTML = `<div id="ecos-preview-panel">
@@ -1374,9 +1800,18 @@
         ${canDelete ? `<button class="pv-del" id="pv-del-btn">✕ Supprimer</button>` : ''}
         <button class="pv-close" id="ecos-preview-close" title="Fermer (Echap)">✕</button>
       </div>
-      <iframe id="ecos-preview-iframe" src="${escapeHtml(safeUrl)}" title="${escapeHtml(file?.name || 'Document')}" allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+      <div id="ecos-preview-split">
+        <iframe id="ecos-preview-iframe" src="${escapeHtml(safeUrl)}" title="${escapeHtml(file?.name || 'Document')}" allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+        <div id="ecos-scoring-panel">
+          ${buildScoringPanelHTML(sddN, sddName, file, sddHref)}
+        </div>
+      </div>
     </div>`;
     document.body.appendChild(backdrop);
+
+    // Init scoring panel
+    const scoringPanel = backdrop.querySelector('#ecos-scoring-panel');
+    const cleanup = initScoringPanel(scoringPanel, sddN, sddName || '', file);
 
     // Rating dans le preview
     const ratingBlock = backdrop.querySelector('#ecos-preview-rating');
@@ -1420,16 +1855,24 @@
       try {
         await deleteEcosFile(sddN, file.id, file.storagePath);
         haptic('warning');
+        cleanup();
         backdrop.remove();
         if (onDelete) onDelete(file.id);
       } catch (err) { alert('Erreur : ' + err.message); btn.textContent = '✕ Supprimer'; btn.disabled = false; }
     });
 
-    const close = () => backdrop.remove();
+    const close = () => { cleanup(); backdrop.remove(); };
     backdrop.querySelector('#ecos-preview-close').addEventListener('click', close);
     backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
     const onKey = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
     document.addEventListener('keydown', onKey);
+  }
+
+  function openEcosPreview(file, currentUid, sddN, onDelete) {
+    // v14: redirect to the new split preview
+    // Resolve SDD name from tags or file info
+    const sddHref = `https://livret.uness.fr/lisa/2025/${encodeURIComponent((file?.sddName || '') + ' SDD-' + sddN)}`.replace(/ SDD-/g, '+SDD-');
+    openEcosPreviewV14(file, currentUid, sddN, '', sddHref, onDelete);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1525,7 +1968,8 @@
         }
         if (el.dataset.action === 'preview') {
           if (!f) return;
-          openEcosPreview(f, currentUid, sddN, (deletedId) => {
+          const sddHref = `https://livret.uness.fr/lisa/2025/${encodeURIComponent(sddName + ' SDD-' + sddN)}`;
+          openEcosPreviewV14(f, currentUid, sddN, sddName, sddHref, (deletedId) => {
             _files = _files.filter(x => x.id !== deletedId);
             renderFileList(_files, currentUid);
           });
