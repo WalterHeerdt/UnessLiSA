@@ -1529,7 +1529,7 @@
     const tags = SDD_TAGS[sddN] || [];
     const matiere = tags[0] || 'Non classée';
     return `
-      ${sddHref ? `<a class="ecos-sdd-link" href="${escapeHtml(sddHref)}" target="_blank">📘 Accéder à la page SDD — ${escapeHtml(sddName || 'SDD-' + sddN)}</a>` : ''}
+      ${sddHref ? `<a class="ecos-sdd-link" href="${escapeHtml(sddHref)}" target="_blank">SDD — ${escapeHtml(sddName || 'SDD-' + sddN)}</a>` : ''}
       <div class="ecos-timer-wrap" id="ecos-timer-section">
         <div class="ecos-timer-phase"><span class="phase-dot idle" id="timer-dot"></span><span id="timer-phase-label">ECOS — 8 min</span></div>
         <div class="ecos-timer-display" id="timer-display">8:00</div>
