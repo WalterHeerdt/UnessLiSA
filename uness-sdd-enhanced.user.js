@@ -961,14 +961,6 @@
       .ecos-grid-score{margin-top:10px;display:flex;align-items:baseline;gap:4px}
       .ecos-grid-score-val{font-size:22px;font-weight:var(--fw-heavy);color:var(--text)}
       .ecos-grid-score-total{font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)}
-      /* Performance */
-      .ecos-perf-btns{display:flex;gap:6px}
-      .ecos-perf-btn{flex:1;padding:8px 4px;border:1.5px solid var(--border);border-radius:var(--r-sm);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;text-align:center;color:var(--text2);transition:all .12s ease}
-      .ecos-perf-btn:hover{border-color:var(--ac)}
-      .ecos-perf-btn.selected-0{background:var(--danger-light);border-color:var(--danger);color:var(--danger)}
-      .ecos-perf-btn.selected-1{background:var(--warning-light);border-color:var(--warning);color:#92400e}
-      .ecos-perf-btn.selected-2{background:#dbeafe;border-color:#3b82f6;color:#1d4ed8}
-      .ecos-perf-btn.selected-3{background:var(--success-light);border-color:var(--success);color:#065f46}
       /* Final score */
       .ecos-final-score{padding:16px;background:#fff;border-top:1px solid var(--border);margin-top:auto}
       .ecos-final-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:var(--fs-tiny);color:var(--text2)}
@@ -983,6 +975,10 @@
       /* SDD link */
       .ecos-sdd-link{display:flex;align-items:center;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border);background:#fff;font-size:var(--fs-tiny);text-decoration:none;color:var(--ac);font-weight:var(--fw-semi);transition:background var(--transition)}
       .ecos-sdd-link:hover{background:var(--ac-light)}
+      .ecos-notes-section{padding:14px 16px;border-bottom:1px solid var(--border);background:#fff}
+      .ecos-notes-section textarea{width:100%;min-height:120px;max-height:300px;resize:vertical;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;font-family:inherit;font-size:var(--fs-tiny);color:var(--text);background:#fff;outline:none;line-height:1.5;transition:border-color var(--transition)}
+      .ecos-notes-section textarea:focus{border-color:var(--ac)}
+      .ecos-notes-section textarea::placeholder{color:var(--muted)}
       @media(max-width:800px){#ecos-scoring-panel{width:260px}}
       @media(max-width:640px){#ecos-preview-split{flex-direction:column}#ecos-scoring-panel{width:100%;max-height:50vh;border-left:none;border-top:1px solid var(--border)}}
       </style>`;
@@ -1411,13 +1407,10 @@
       .ecos-grid-score{margin-top:10px;display:flex;align-items:baseline;gap:4px}
       .ecos-grid-score-val{font-size:22px;font-weight:var(--fw-heavy);color:var(--text)}
       .ecos-grid-score-total{font-size:var(--fs-small);color:var(--muted);font-weight:var(--fw-med)}
-      .ecos-perf-btns{display:flex;gap:6px}
-      .ecos-perf-btn{flex:1;padding:8px 4px;border:1.5px solid var(--border);border-radius:var(--r-sm);background:#fff;font-family:inherit;font-size:var(--fs-tiny);font-weight:var(--fw-semi);cursor:pointer;text-align:center;color:var(--text2);transition:all .12s ease}
-      .ecos-perf-btn:hover{border-color:var(--ac)}
-      .ecos-perf-btn.selected-0{background:var(--danger-light);border-color:var(--danger);color:var(--danger)}
-      .ecos-perf-btn.selected-1{background:var(--warning-light);border-color:var(--warning);color:#92400e}
-      .ecos-perf-btn.selected-2{background:#dbeafe;border-color:#3b82f6;color:#1d4ed8}
-      .ecos-perf-btn.selected-3{background:var(--success-light);border-color:var(--success);color:#065f46}
+      .ecos-notes-section{padding:14px 16px;border-bottom:1px solid var(--border);background:#fff}
+      .ecos-notes-section textarea{width:100%;min-height:120px;max-height:300px;resize:vertical;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;font-family:inherit;font-size:var(--fs-tiny);color:var(--text);background:#fff;outline:none;line-height:1.5;transition:border-color var(--transition)}
+      .ecos-notes-section textarea:focus{border-color:var(--ac)}
+      .ecos-notes-section textarea::placeholder{color:var(--muted)}
       .ecos-final-score{padding:16px;background:#fff;border-top:1px solid var(--border);margin-top:auto}
       .ecos-final-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:var(--fs-tiny);color:var(--text2)}
       .ecos-final-row-val{font-weight:var(--fw-bold);color:var(--text)}
@@ -1539,6 +1532,10 @@
           <button class="ecos-timer-btn" id="timer-reset">↺ Reset</button>
         </div>
       </div>
+      <div class="ecos-notes-section">
+        <div class="ecos-scoring-title">Mes notes</div>
+        <textarea id="ecos-notes-textarea" placeholder="Écris tes réponses, idées, hypothèses diagnostiques…"></textarea>
+      </div>
       <div class="ecos-scoring-section">
         <div class="ecos-scoring-title">Grille de notation</div>
         <div class="ecos-grid-config">
@@ -1551,20 +1548,8 @@
           <span class="ecos-grid-score-total">/ <span id="ecos-grid-max">20</span></span>
         </div>
       </div>
-      <div class="ecos-scoring-section">
-        <div class="ecos-scoring-title">Performance globale /3</div>
-        <div class="ecos-perf-btns">
-          <button class="ecos-perf-btn" data-perf="0">0</button>
-          <button class="ecos-perf-btn" data-perf="1">1</button>
-          <button class="ecos-perf-btn" data-perf="2">2</button>
-          <button class="ecos-perf-btn" data-perf="3">3</button>
-        </div>
-      </div>
       <div class="ecos-final-score" id="ecos-final-score">
-        <div class="ecos-final-row"><span>Grille ECOS</span><span class="ecos-final-row-val" id="final-grid">0 / 20</span></div>
-        <div class="ecos-final-row"><span>Performance globale</span><span class="ecos-final-row-val" id="final-perf">— / 3</span></div>
-        <div class="ecos-final-divider"></div>
-        <div class="ecos-final-total"><span>Note station</span><span class="ecos-final-total-val" id="final-total">—</span></div>
+        <div class="ecos-final-total"><span>Note station</span><span class="ecos-final-total-val" id="final-total">0 / 20</span></div>
         <div style="font-size:10px;color:var(--muted);margin-top:4px" id="final-matiere">${escapeHtml(matiere)}</div>
         <button class="ecos-final-save" id="ecos-save-btn" disabled>💾 Enregistrer la note</button>
       </div>`;
@@ -1575,7 +1560,7 @@
     const matiere = tags[0] || 'Non classée';
 
     // State
-    let gridTotal = 20, earnedPoints = new Set(), perfScore = -1;
+    let gridTotal = 20, earnedPoints = new Set();
 
     // Timer state
     const PHASE_ECOS = 0, PHASE_DEBRIEF = 1, PHASE_DONE = 2;
@@ -1593,9 +1578,6 @@
     const gridValEl = container.querySelector('#ecos-grid-val');
     const gridMaxEl = container.querySelector('#ecos-grid-max');
     const gridTotalInput = container.querySelector('#ecos-grid-total');
-    const perfBtns = container.querySelectorAll('.ecos-perf-btn');
-    const finalGrid = container.querySelector('#final-grid');
-    const finalPerf = container.querySelector('#final-perf');
     const finalTotal = container.querySelector('#final-total');
     const saveBtn = container.querySelector('#ecos-save-btn');
 
@@ -1620,17 +1602,13 @@
     function tick() {
       remaining--;
       if (remaining <= 0) {
-        // Phase transition
         if (phase === PHASE_ECOS) {
-          // Auto-transition to debrief
           phase = PHASE_DEBRIEF;
           remaining = PHASE_DURATIONS[1];
           haptic('warning');
-          // Brief flash effect
           container.querySelector('.ecos-timer-wrap').style.background = '#fef3c7';
           setTimeout(() => { container.querySelector('.ecos-timer-wrap').style.background = ''; }, 600);
         } else {
-          // End
           clearInterval(timerInterval);
           running = false;
           phase = PHASE_DONE;
@@ -1699,28 +1677,13 @@
 
     renderGrid();
 
-    // ── Performance ──
-    perfBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const val = parseInt(btn.dataset.perf, 10);
-        perfScore = perfScore === val ? -1 : val; // Toggle
-        perfBtns.forEach(b => { b.className = 'ecos-perf-btn' + (parseInt(b.dataset.perf, 10) === perfScore ? ' selected-' + perfScore : ''); });
-        haptic('selection');
-        updateScores();
-      });
-    });
-
     // ── Scores ──
     function updateScores() {
       const gridScore = earnedPoints.size;
       gridValEl.textContent = gridScore;
-      finalGrid.textContent = `${gridScore} / ${gridTotal}`;
-      finalPerf.textContent = perfScore >= 0 ? `${perfScore} / 3` : '— / 3';
 
-      if (perfScore >= 0 && gridTotal > 0) {
-        // Performance as coefficient: grid normalized /20 × (1 + perf/10)
-        const gridNorm = (gridScore / gridTotal) * 20;
-        const finalNote = Math.min(20, Math.round(gridNorm * (1 + perfScore / 10) * 10) / 10);
+      if (gridTotal > 0) {
+        const finalNote = Math.round((gridScore / gridTotal) * 20 * 10) / 10;
         finalTotal.textContent = finalNote.toFixed(1) + ' / 20';
         saveBtn.disabled = false;
       } else {
@@ -1733,13 +1696,12 @@
     saveBtn.addEventListener('click', async () => {
       if (!cloudEnabled()) return;
       const gridScore = earnedPoints.size;
-      const gridNorm = (gridScore / gridTotal) * 20;
-      const finalNote = Math.min(20, Math.round(gridNorm * (1 + perfScore / 10) * 10) / 10);
+      const finalNote = Math.round((gridScore / gridTotal) * 20 * 10) / 10;
 
       saveBtn.disabled = true; saveBtn.textContent = '…';
       try {
         await saveEcosScore(sddN, file?.id || 'unknown', {
-          gridScore, gridTotal, performance: perfScore, finalScore: finalNote,
+          gridScore, gridTotal, performance: 0, finalScore: finalNote,
           matiere, sddName: sddName || '', fileName: file?.name || '',
           date: new Date().toISOString(),
         });
@@ -1748,6 +1710,7 @@
         saveBtn.classList.add('saved');
         setTimeout(() => { saveBtn.textContent = '💾 Enregistrer la note'; saveBtn.classList.remove('saved'); saveBtn.disabled = false; }, 2000);
       } catch (err) {
+        console.error('[ECOS Score Save]', err);
         saveBtn.textContent = '⚠ Erreur'; saveBtn.disabled = false;
         setTimeout(() => { saveBtn.textContent = '💾 Enregistrer la note'; }, 2000);
       }
@@ -1759,10 +1722,6 @@
         if (!data) return;
         if (data.gridTotal) { gridTotal = data.gridTotal; gridTotalInput.value = gridTotal; }
         if (data.gridScore) { for (let i = 1; i <= data.gridScore; i++) earnedPoints.add(i); }
-        if (data.performance != null && data.performance >= 0) {
-          perfScore = data.performance;
-          perfBtns.forEach(b => { b.className = 'ecos-perf-btn' + (parseInt(b.dataset.perf, 10) === perfScore ? ' selected-' + perfScore : ''); });
-        }
         renderGrid();
       }).catch(() => {});
     }
