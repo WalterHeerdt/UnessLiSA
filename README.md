@@ -1,6 +1,6 @@
 # UNESS – SDD + ECOS
 
-> Userscript Tampermonkey qui transforme le livret LISA 2025 en véritable outil de révision pour l'EDN/ECOS.
+> Userscript Tampermonkey qui transforme le livret LISA 2025 en outil de révision pour les ECOS.
 
 ![Version](https://img.shields.io/badge/version-14.0-6366f1)
 ![Platform](https://img.shields.io/badge/platform-Tampermonkey-green)
