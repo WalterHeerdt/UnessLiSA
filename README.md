@@ -160,4 +160,14 @@ Le code est sur [GitHub](https://github.com/WalterHeerdt/UnessLiSA). Si tu trouv
 
 ---
 
+## ☕ Soutenir le projet
+
+Ce script est gratuit et le restera. Si tu trouves qu'il t'aide dans tes révisions et que tu veux me payer un café, c'est par ici :
+
+**[☕ Me soutenir sur Ko-fi](https://ko-fi.com/leo960664)**
+
+Merci, ça fait plaisir et ça motive à continuer ! 🙏
+
+---
+
 *Fait pour la promo DFASM3 2026 — bon courage pour les ECOS !* 🩺
