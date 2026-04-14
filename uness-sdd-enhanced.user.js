@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      14.2
+// @version      15
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS + Point rouge ECOS + Filtre ECOS + Checkbox station faite + Notation /5 + Haptics mobile + ECOS Scoring Panel + Performance globale + Historique par matière + Chrono partage
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
@@ -920,72 +920,85 @@
       #btn-chrono{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:color var(--transition),border-color var(--transition)}
       #btn-chrono:hover{color:#059669;border-color:#059669}
 
-      /* ── Chrono fullscreen overlay ── */
-      #chrono-overlay{position:fixed;inset:0;z-index:3000;background:#08080b;display:flex;flex-direction:column;font-family:var(--ff)}
-      #chrono-overlay *{box-sizing:border-box}
-      #chrono-overlay::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:.7}
-      #chrono-overlay>*{position:relative;z-index:1}
-      .co-glow{position:absolute;inset:0;z-index:0;transition:opacity .8s;pointer-events:none}
-      .co-glow.ex{background:radial-gradient(55% 55% at 50% 85%,rgba(99,102,241,.1) 0%,transparent 100%);opacity:1}
-      .co-glow.db{background:radial-gradient(55% 55% at 50% 85%,rgba(239,68,68,.09) 0%,transparent 100%);opacity:1}
-      .co-glow.dn{background:radial-gradient(55% 55% at 50% 85%,rgba(16,185,129,.09) 0%,transparent 100%);opacity:1}
+      #chrono-overlay{position:fixed;inset:0;z-index:3000;background:#000;display:flex;flex-direction:column;overflow:hidden}
+      #chrono-overlay *{box-sizing:border-box;margin:0;padding:0}
 
-      .co-bar{display:flex;align-items:center;padding:16px 24px;gap:12px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06)}
-      .co-title{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#64748b}
-      .co-room{display:flex;align-items:center;gap:8px;margin-left:auto}
-      .co-room-code{font-family:ui-monospace,monospace;font-size:13px;font-weight:600;color:#a5b4fc;letter-spacing:1px;background:rgba(165,180,252,.08);padding:4px 12px;border-radius:6px;user-select:all}
-      .co-room-btn{padding:5px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#94a3b8;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}
-      .co-room-btn:hover{background:rgba(255,255,255,.08);color:#e2e8f0}
-      .co-close{padding:5px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#94a3b8;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;margin-left:8px}
-      .co-close:hover{background:rgba(239,68,68,.15);color:#fca5a5;border-color:rgba(239,68,68,.3)}
+      .co-topbar{display:flex;align-items:center;height:48px;padding:0 20px;background:#0a0a0a;border-bottom:1px solid #1a1a1a;flex-shrink:0;gap:10px}
+      .co-topbar-title{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#444;font-family:system-ui,sans-serif}
+      .co-topbar-room{font-family:ui-monospace,'SF Mono',monospace;font-size:14px;font-weight:700;color:#7c83ff;letter-spacing:2px;background:#7c83ff10;padding:3px 14px;border-radius:4px;cursor:pointer;user-select:all;transition:background .15s}
+      .co-topbar-room:hover{background:#7c83ff22}
+      .co-topbar-sep{flex:1}
+      .co-topbar-conn{display:flex;align-items:center;gap:6px;font-size:11px;color:#555;font-family:system-ui,sans-serif;cursor:pointer;padding:4px 10px;border-radius:4px;transition:background .15s}
+      .co-topbar-conn:hover{background:#1a1a1a}
+      .co-topbar-conn .dot{width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0;animation:co-pulse 2s ease infinite}
+      @keyframes co-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+      .co-topbar-btn{height:30px;padding:0 14px;border-radius:4px;border:1px solid #222;background:#111;color:#666;font-family:system-ui,sans-serif;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px}
+      .co-topbar-btn:hover{background:#1a1a1a;color:#aaa;border-color:#333}
+      .co-topbar-btn.close:hover{background:#1c1010;color:#f87171;border-color:#7f1d1d44}
 
-      .co-center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 24px;min-height:0}
-      .co-phase{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;display:flex;align-items:center;gap:8px}
-      .co-phase .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-      .co-phase .dot.on{animation:co-blink 1.4s ease infinite}
-      @keyframes co-blink{0%,100%{opacity:1}50%{opacity:.2}}
-      .co-phase.ex{color:#a5b4fc} .co-phase.ex .dot{background:#818cf8}
-      .co-phase.db{color:#fca5a5} .co-phase.db .dot{background:#f87171}
-      .co-phase.dn{color:#6ee7b7} .co-phase.dn .dot{background:#34d399}
-      .co-phase.idle{color:#64748b} .co-phase.idle .dot{background:#475569}
+      .co-body{flex:1;display:flex;min-height:0;overflow:hidden}
+      .co-main{flex:1;display:flex;flex-direction:column;min-width:0}
+      .co-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;min-height:0}
 
-      .co-digits{font-family:'DM Mono',ui-monospace,monospace;font-size:clamp(100px,22vw,220px);font-weight:300;font-variant-numeric:tabular-nums;letter-spacing:-6px;line-height:1;color:#f1f5f9;transition:color .4s}
-      .co-digits.warn{color:#fbbf24}
-      .co-digits.danger{color:#f87171}
-      .co-digits.done-color{color:#34d399}
+      .co-phase-label{font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2.5px;color:#444;margin-bottom:10px;font-family:system-ui,sans-serif;display:flex;align-items:center;gap:9px;transition:color .4s}
+      .co-phase-label .ind{width:9px;height:9px;border-radius:50%;background:#222;transition:background .4s}
 
-      .co-loop{font-size:13px;font-weight:600;color:#475569;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+      .co-timer{font-family:'DM Mono',ui-monospace,'SF Mono',monospace;font-weight:300;font-variant-numeric:tabular-nums;letter-spacing:-0.04em;line-height:1;color:#fff;transition:color .5s;user-select:none}
+      .co-timer .co-sep{opacity:.3}
 
-      .co-rail{width:min(600px,80vw);height:4px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
-      .co-rail-fill{height:100%;border-radius:3px;transform-origin:left;transition:transform 1s linear,background .5s}
-      .co-rail-fill.ex{background:#818cf8}
-      .co-rail-fill.db{background:#f87171}
-      .co-rail-fill.dn{background:#34d399}
+      .co-progress{width:min(580px,78vw);height:4px;background:#141414;border-radius:2px;overflow:hidden;margin-top:28px}
+      .co-progress-fill{height:100%;border-radius:2px;transform-origin:left;transition:transform 1s linear,background .5s;background:#333}
 
-      .co-footer{display:flex;align-items:center;justify-content:center;gap:12px;padding:20px 24px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.06)}
-      .co-loops-group{display:flex;align-items:center;gap:10px}
-      .co-loops-label{font-size:11px;color:#64748b;letter-spacing:.3px}
-      .co-stepper{display:flex;align-items:center;background:rgba(255,255,255,.05);border-radius:6px;overflow:hidden}
-      .co-stepper button{background:none;border:none;color:#64748b;font-size:17px;width:32px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .15s,background .15s}
-      .co-stepper button:hover{color:#e2e8f0;background:rgba(255,255,255,.08)}
-      .co-stepper input{font-family:ui-monospace,monospace;font-size:15px;font-weight:600;width:30px;text-align:center;background:none;border:none;color:#e2e8f0;padding:0;-moz-appearance:textfield}
+      .co-bottombar{min-height:56px;display:flex;align-items:center;justify-content:center;gap:14px;padding:12px 24px;background:#0a0a0a;border-top:1px solid #1a1a1a;flex-shrink:0;flex-wrap:wrap}
+      .co-bottombar-group{display:flex;align-items:center;gap:10px}
+      .co-bottombar-label{font-size:11px;color:#444;font-family:system-ui,sans-serif;font-weight:600;letter-spacing:.5px}
+      .co-bottombar-unit{font-size:10px;color:#333;font-family:system-ui,sans-serif}
+      .co-stepper{display:flex;align-items:center;background:#111;border:1px solid #222;border-radius:4px;overflow:hidden}
+      .co-stepper button{background:none;border:none;color:#555;font-size:16px;width:30px;height:30px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .15s,background .15s;font-family:system-ui}
+      .co-stepper button:hover{color:#fff;background:#222}
+      .co-stepper input{font-family:ui-monospace,monospace;font-size:14px;font-weight:700;width:26px;text-align:center;background:none;border:none;color:#ccc;padding:0;-moz-appearance:textfield}
       .co-stepper input::-webkit-outer-spin-button,.co-stepper input::-webkit-inner-spin-button{-webkit-appearance:none}
       .co-stepper input:focus{outline:none}
 
-      .co-btn{padding:12px 32px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#94a3b8;font-family:inherit;font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;cursor:pointer;transition:all .15s;min-width:120px}
-      .co-btn:hover{background:rgba(255,255,255,.08);color:#e2e8f0}
-      .co-btn.go{background:#4f46e5;border-color:#4f46e5;color:#fff}
-      .co-btn.go:hover{background:#4338ca}
-      .co-btn.stop{background:#ef4444;border-color:#ef4444;color:#fff}
-      .co-btn.stop:hover{background:#dc2626}
-      .co-btn:disabled{opacity:.35;pointer-events:none}
+      .co-action{height:34px;padding:0 28px;border-radius:4px;border:none;font-family:system-ui,sans-serif;font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;transition:all .15s}
+      .co-action.start{background:#4f46e5;color:#fff} .co-action.start:hover{background:#4338ca}
+      .co-action.pause{background:#ef4444;color:#fff} .co-action.pause:hover{background:#dc2626}
+      .co-action.reset{background:#111;color:#666;border:1px solid #222} .co-action.reset:hover{background:#1a1a1a;color:#aaa;border-color:#333}
+      .co-action:disabled{opacity:.3;pointer-events:none}
 
-      .co-sync{display:flex;align-items:center;gap:6px;position:absolute;bottom:20px;right:24px}
-      .co-sync-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-      .co-sync-dot.on{background:#34d399}
-      .co-sync-dot.off{background:#475569}
-      .co-sync-label{font-size:9px;color:#475569;letter-spacing:.3px}
-      .co-users{font-size:9px;color:#64748b;letter-spacing:.3px;margin-left:8px}
+      /* Connections panel */
+      .co-panel{width:0;overflow:hidden;background:#0a0a0a;border-left:1px solid #1a1a1a;display:flex;flex-direction:column;transition:width .25s ease;flex-shrink:0}
+      .co-panel.open{width:220px}
+      .co-panel-head{padding:14px 16px;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;justify-content:space-between}
+      .co-panel-title{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#444;font-family:system-ui,sans-serif}
+      .co-panel-count{font-size:11px;font-weight:700;color:#555;font-family:ui-monospace,monospace;background:#141414;padding:2px 8px;border-radius:3px}
+      .co-panel-list{flex:1;overflow-y:auto;padding:8px 0}
+      .co-panel-user{display:flex;align-items:center;gap:8px;padding:7px 16px;font-size:12px;color:#888;font-family:system-ui,sans-serif}
+      .co-panel-user .udot{width:6px;height:6px;border-radius:50%;background:#22c55e;flex-shrink:0}
+      .co-panel-user.stale .udot{background:#555}
+      .co-panel-user.stale{color:#444}
+
+      /* Phase states via data attributes */
+      .co-stage[data-phase="exercise"] .co-phase-label{color:#818cf8}
+      .co-stage[data-phase="exercise"] .ind{background:#818cf8}
+      .co-stage[data-phase="exercise"] .co-progress-fill{background:#818cf8}
+
+      .co-stage[data-phase="debrief"] .co-phase-label{color:#f87171}
+      .co-stage[data-phase="debrief"] .ind{background:#f87171}
+      .co-stage[data-phase="debrief"] .co-progress-fill{background:#f87171}
+
+      .co-stage[data-phase="done"] .co-phase-label{color:#34d399}
+      .co-stage[data-phase="done"] .ind{background:#34d399;animation:none}
+      .co-stage[data-phase="done"] .co-progress-fill{background:#34d399}
+      .co-stage[data-phase="done"] .co-timer{color:#34d399}
+
+      .co-stage[data-running="true"] .ind{animation:co-pulse 1.4s ease infinite}
+      .co-timer.warn{color:#fbbf24}
+      .co-timer.danger{color:#f87171}
+
+      .co-loop-info{font-size:12px;font-weight:600;color:#333;font-variant-numeric:tabular-nums;letter-spacing:.5px;margin-top:14px;font-family:system-ui,sans-serif}
+
+      @media(max-width:640px){.co-panel.open{width:180px}.co-timer{letter-spacing:-0.02em}}
       #ecos-preview-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
       #ecos-preview-panel{width:min(1200px,96vw);height:92vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
       #ecos-preview-head{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:var(--fs-small);font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff;flex-wrap:wrap}
@@ -1311,323 +1324,359 @@
 
 
     // ══════════════════════════════════════════════════════════════════
-    // CHRONO PARTAGE — overlay fullscreen + Firestore real-time sync
+    // CHRONO PARTAGE — stagetimer-style + Firestore sync + presence
     // ══════════════════════════════════════════════════════════════════
     document.getElementById('btn-chrono')?.addEventListener('click', () => openChronoOverlay());
+
+    function genRoomCode() {
+      const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let o = '';
+      for (let i = 0; i < 6; i++) o += c[Math.floor(Math.random() * c.length)];
+      return o;
+    }
 
     function openChronoOverlay() {
       if (document.getElementById('chrono-overlay')) return;
       if (!cloudEnabled()) { alert('Cloud sync requis pour le chrono partage.'); return; }
 
-      let roomCode = prompt('Code session chrono (laisser vide pour creer une nouvelle session) :');
+      let roomCode = prompt('Code session chrono\n(laisser vide = nouvelle session) :');
       if (roomCode === null) return;
       roomCode = (roomCode || '').trim().toUpperCase();
       const isNew = !roomCode;
       if (isNew) roomCode = genRoomCode();
 
+      // Firestore paths — uses ecos_sessions/{room} (see rules)
+      const stateDoc    = () => `${firestoreBase()}/ecos_sessions/${roomCode}/state/live`;
+      const presenceCol = () => `${firestoreBase()}/ecos_sessions/${roomCode}/presence`;
+      let myPresenceId  = null;
+
       const ov = document.createElement('div');
       ov.id = 'chrono-overlay';
       ov.innerHTML = `
-        <div class="co-glow ex" id="co-glow"></div>
-        <div class="co-bar">
-          <span class="co-title">Chrono ECOS</span>
-          <div class="co-room">
-            <span class="co-room-code" id="co-code" title="Cliquer pour copier">${escapeHtml(roomCode)}</span>
-            <button class="co-room-btn" id="co-copy">Copier</button>
-            <button class="co-close" id="co-close">Fermer</button>
+        <div class="co-topbar">
+          <span class="co-topbar-title">Chrono ECOS</span>
+          <span class="co-topbar-room" id="co-room" title="Cliquer pour copier">${escapeHtml(roomCode)}</span>
+          <button class="co-topbar-btn" id="co-copy">Copier le code</button>
+          <span class="co-topbar-sep"></span>
+          <div class="co-topbar-conn" id="co-conn-toggle">
+            <span class="dot"></span>
+            <span id="co-conn-count">1 connecte</span>
           </div>
+          <button class="co-topbar-btn close" id="co-close">Fermer</button>
         </div>
-        <div class="co-center">
-          <div class="co-phase idle" id="co-phase"><span class="dot"></span><span id="co-phase-text">Pret</span></div>
-          <div class="co-digits" id="co-digits">08:00</div>
-          <div class="co-loop" id="co-loop"></div>
-          <div class="co-rail"><div class="co-rail-fill ex" id="co-rail" style="transform:scaleX(1)"></div></div>
-        </div>
-        <div class="co-footer">
-          <div class="co-loops-group">
-            <span class="co-loops-label">Boucles</span>
-            <div class="co-stepper">
-              <button id="co-loop-minus">&minus;</button>
-              <input type="number" id="co-loops" value="3" min="1" max="9">
-              <button id="co-loop-plus">+</button>
+        <div class="co-body">
+          <div class="co-main">
+            <div class="co-stage" id="co-stage" data-phase="idle" data-running="false">
+              <div class="co-phase-label"><span class="ind"></span><span id="co-phase-text">Pret</span></div>
+              <div class="co-timer" id="co-timer" style="font-size:clamp(90px,20vw,200px)">
+                <span class="co-min">08</span><span class="co-sep">:</span><span class="co-sec">00</span>
+              </div>
+              <div class="co-loop-info" id="co-loop"></div>
+              <div class="co-progress"><div class="co-progress-fill" id="co-rail" style="transform:scaleX(1)"></div></div>
+            </div>
+            <div class="co-bottombar">
+              <div class="co-bottombar-group">
+                <span class="co-bottombar-label">Exercice</span>
+                <div class="co-stepper">
+                  <button id="co-ex-m">&minus;</button>
+                  <input type="number" id="co-ex-dur" value="8" min="1" max="30">
+                  <button id="co-ex-p">+</button>
+                </div>
+                <span class="co-bottombar-unit">min</span>
+              </div>
+              <div class="co-bottombar-group">
+                <span class="co-bottombar-label">Debrief</span>
+                <div class="co-stepper">
+                  <button id="co-db-m">&minus;</button>
+                  <input type="number" id="co-db-dur" value="3" min="1" max="15">
+                  <button id="co-db-p">+</button>
+                </div>
+                <span class="co-bottombar-unit">min</span>
+              </div>
+              <div class="co-bottombar-group">
+                <span class="co-bottombar-label">Boucles</span>
+                <div class="co-stepper">
+                  <button id="co-loop-m">&minus;</button>
+                  <input type="number" id="co-loops" value="3" min="1" max="9">
+                  <button id="co-loop-p">+</button>
+                </div>
+              </div>
+              <button class="co-action start" id="co-start">Lancer</button>
+              <button class="co-action reset" id="co-reset">Reset</button>
             </div>
           </div>
-          <button class="co-btn go" id="co-start">Lancer</button>
-          <button class="co-btn" id="co-reset">Reset</button>
-        </div>
-        <div class="co-sync">
-          <span class="co-sync-dot off" id="co-sync-dot"></span>
-          <span class="co-sync-label" id="co-sync-label">Connexion...</span>
+          <div class="co-panel" id="co-panel">
+            <div class="co-panel-head">
+              <span class="co-panel-title">Connexions</span>
+              <span class="co-panel-count" id="co-panel-count">0</span>
+            </div>
+            <div class="co-panel-list" id="co-panel-list"></div>
+          </div>
         </div>
       `;
       document.body.appendChild(ov);
+      const _origTitle = document.title;
 
-      const elDigits   = ov.querySelector('#co-digits');
-      const elPhase    = ov.querySelector('#co-phase');
-      const elPhaseTxt = ov.querySelector('#co-phase-text');
-      const elRail     = ov.querySelector('#co-rail');
-      const elGlow     = ov.querySelector('#co-glow');
-      const elLoop     = ov.querySelector('#co-loop');
-      const elLoopsInp = ov.querySelector('#co-loops');
-      const btnStart   = ov.querySelector('#co-start');
-      const btnReset   = ov.querySelector('#co-reset');
-      const syncDot    = ov.querySelector('#co-sync-dot');
-      const syncLabel  = ov.querySelector('#co-sync-label');
+      const $ = sel => ov.querySelector(sel);
+      const elTimer    = $('#co-timer');
+      const elMin      = elTimer.querySelector('.co-min');
+      const elSec      = elTimer.querySelector('.co-sec');
+      const elStage    = $('#co-stage');
+      const elPhase    = $('#co-phase-text');
+      const elRail     = $('#co-rail');
+      const elLoop     = $('#co-loop');
+      const elLoops    = $('#co-loops');
+      const elExDur    = $('#co-ex-dur');
+      const elDbDur    = $('#co-db-dur');
+      const btnStart   = $('#co-start');
+      const btnReset   = $('#co-reset');
+      const elConnCount = $('#co-conn-count');
+      const elPanelCount = $('#co-panel-count');
+      const elPanelList  = $('#co-panel-list');
+      const elPanel      = $('#co-panel');
 
-      const PHASE_EX = 0, PHASE_DB = 1, PHASE_DONE = 2;
-      const PHASE_DUR = [8 * 60, 3 * 60];
-      const PHASE_NAMES = ['Entrainement', 'Debriefing', 'Termine'];
+      const PH_EX = 0, PH_DB = 1, PH_DONE = 2;
+      let PH_DUR = [8 * 60, 3 * 60];
+      const PH_NAME = ['Entrainement', 'Debriefing', 'Termine'];
+      const PH_KEY  = ['exercise', 'debrief', 'done'];
 
-      let state = {
-        phase: -1, remaining: PHASE_DUR[0], running: false,
-        currentLoop: 1, totalLoops: 3,
-        startedAt: 0, updatedAt: 0
-      };
-      let localInterval = null;
-      let pollInterval = null;
-      let destroyed = false;
-      let iAmDriver = false;
 
-      const docPath = () => `${firestoreBase()}/chronoSessions/${roomCode}`;
+      // State: startedAt = timestamp when running began, remaining = value AT that moment
+      // Clients compute live: remaining - floor((now - startedAt)/1000)
+      let S = { phase: -1, remaining: PH_DUR[0], running: false, loop: 1, loops: 3, startedAt: 0, ts: 0, durEx: 8, durDb: 3 };
+      let tickIv = null, pollIv = null, presIv = null, dead = false;
 
-      async function fsGet() {
+      // ── Firestore CRUD ──
+      async function getState() {
         const tok = await cloudEnsureSession(); if (!tok) return null;
-        const r = await fetch(docPath(), { headers: { Authorization: 'Bearer ' + tok.idToken } });
-        if (r.status === 404) return null;
-        if (!r.ok) return null;
-        const j = await r.json();
-        return decodeState(j.fields || {});
+        try {
+          const r = await fetch(stateDoc(), { headers: { Authorization: 'Bearer ' + tok.idToken } });
+          if (!r.ok) return null;
+          return dec((await r.json()).fields || {});
+        } catch { return null; }
       }
-
-      async function fsPut(s) {
+      async function putState(s) {
         const tok = await cloudEnsureSession(); if (!tok) return;
-        await fetch(docPath(), {
+        s.ts = Date.now();
+        await fetch(stateDoc(), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok.idToken },
-          body: JSON.stringify({ fields: encodeState(s) })
-        });
+          body: JSON.stringify({ fields: enc(s) })
+        }).catch(() => {});
       }
-
-      function encodeState(s) {
+      function enc(s) {
         return {
-          phase:       { integerValue: String(s.phase) },
-          remaining:   { integerValue: String(s.remaining) },
-          running:     { booleanValue: !!s.running },
-          currentLoop: { integerValue: String(s.currentLoop) },
-          totalLoops:  { integerValue: String(s.totalLoops) },
-          startedAt:   { integerValue: String(s.startedAt || 0) },
-          updatedAt:   { integerValue: String(Date.now()) }
+          phase: { integerValue: String(s.phase) }, remaining: { integerValue: String(s.remaining) },
+          running: { booleanValue: !!s.running }, loop: { integerValue: String(s.loop) },
+          loops: { integerValue: String(s.loops) }, startedAt: { integerValue: String(s.startedAt || 0) },
+          ts: { integerValue: String(s.ts || 0) },
+          durEx: { integerValue: String(s.durEx || 8) }, durDb: { integerValue: String(s.durDb || 3) }
         };
       }
-
-      function decodeState(f) {
-        const gi = (k, def) => parseInt(f[k]?.integerValue ?? String(def), 10);
-        return {
-          phase:       gi('phase', -1),
-          remaining:   gi('remaining', PHASE_DUR[0]),
-          running:     f.running?.booleanValue === true,
-          currentLoop: gi('currentLoop', 1),
-          totalLoops:  gi('totalLoops', 3),
-          startedAt:   gi('startedAt', 0),
-          updatedAt:   gi('updatedAt', 0)
-        };
+      function dec(f) {
+        const g = (k, d) => parseInt(f[k]?.integerValue ?? String(d), 10);
+        return { phase: g('phase', -1), remaining: g('remaining', PH_DUR[0]), running: f.running?.booleanValue === true, loop: g('loop', 1), loops: g('loops', 3), startedAt: g('startedAt', 0), ts: g('ts', 0), durEx: g('durEx', 8), durDb: g('durDb', 3) };
+      }
+      function applyDurations() {
+        PH_DUR[0] = S.durEx * 60;
+        PH_DUR[1] = S.durDb * 60;
+      }
+      function liveRemaining() {
+        if (!S.running || S.phase < 0 || !S.startedAt) return S.remaining;
+        const elapsed = Math.floor((Date.now() - S.startedAt) / 1000);
+        return Math.max(S.remaining - elapsed, -1);
       }
 
+      // ── Presence ──
+      async function heartbeat() {
+        const tok = await cloudEnsureSession(); if (!tok) return;
+        const uid = tok.uid || 'anon'; myPresenceId = uid;
+        const name = getCloudUsername() || uid.slice(0, 8);
+        await fetch(`${presenceCol()}/${encodeURIComponent(uid)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok.idToken },
+          body: JSON.stringify({ fields: { t: { integerValue: String(Date.now()) }, name: { stringValue: name } } })
+        }).catch(() => {});
+      }
+      async function fetchPresence() {
+        const tok = await cloudEnsureSession(); if (!tok) return [];
+        try {
+          const r = await fetch(presenceCol(), { headers: { Authorization: 'Bearer ' + tok.idToken } });
+          if (!r.ok) return [];
+          const docs = (await r.json()).documents || [];
+          const now = Date.now(), STALE = 20000;
+          return docs.map(d => {
+            const t = parseInt(d.fields?.t?.integerValue || '0', 10);
+            const name = d.fields?.name?.stringValue || d.name?.split('/').pop() || '?';
+            return { name, alive: (now - t) < STALE };
+          }).sort((a, b) => b.alive - a.alive || a.name.localeCompare(b.name));
+        } catch { return []; }
+      }
+      async function removePresence() {
+        if (!myPresenceId) return;
+        const tok = await cloudEnsureSession(); if (!tok) return;
+        fetch(`${presenceCol()}/${encodeURIComponent(myPresenceId)}`, {
+          method: 'DELETE', headers: { Authorization: 'Bearer ' + tok.idToken }
+        }).catch(() => {});
+      }
+      function renderPresence(users) {
+        const alive = users.filter(u => u.alive).length;
+        elConnCount.textContent = alive + ' connecte' + (alive > 1 ? 's' : '');
+        elPanelCount.textContent = String(alive);
+        elPanelList.innerHTML = users.map(u =>
+          `<div class="co-panel-user${u.alive ? '' : ' stale'}"><span class="udot"></span>${escapeHtml(u.name)}</div>`
+        ).join('');
+      }
+
+      // ── Render (uses liveRemaining) ──
       function render() {
-        const ph = state.phase;
-        const rem = Math.max(0, state.remaining);
-        const m = Math.floor(rem / 60), s = rem % 60;
-        elDigits.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-
-        const cls = ph === PHASE_EX ? 'ex' : ph === PHASE_DB ? 'db' : ph === PHASE_DONE ? 'dn' : 'idle';
-        elPhase.className = 'co-phase ' + cls;
-        elPhaseTxt.textContent = ph >= 0 && ph <= 2 ? PHASE_NAMES[ph] : 'Pret';
-        const dot = elPhase.querySelector('.dot');
-        dot.className = 'dot' + (state.running ? ' on' : '');
-
-        elGlow.className = 'co-glow ' + cls;
-
-        const total = ph >= 0 && ph < 2 ? PHASE_DUR[ph] : PHASE_DUR[0];
-        const pct = total > 0 ? rem / total : (ph === PHASE_DONE ? 0 : 1);
+        applyDurations();
+        const ph = S.phase, rem = Math.max(0, liveRemaining());
+        elMin.textContent = String(Math.floor(rem / 60)).padStart(2, '0');
+        elSec.textContent = String(rem % 60).padStart(2, '0');
+        const phKey = ph >= 0 && ph <= 2 ? PH_KEY[ph] : 'idle';
+        elStage.dataset.phase = phKey;
+        elStage.dataset.running = S.running ? 'true' : 'false';
+        elPhase.textContent = ph >= 0 && ph <= 2 ? PH_NAME[ph] : 'Pret';
+        const total = ph >= 0 && ph < 2 ? PH_DUR[ph] : PH_DUR[0];
+        const pct = total > 0 ? rem / total : (ph === PH_DONE ? 0 : 1);
         elRail.style.transform = 'scaleX(' + pct + ')';
-        elRail.className = 'co-rail-fill ' + cls;
-
         const ratio = total > 0 ? rem / total : 1;
-        elDigits.className = 'co-digits' + (ph === PHASE_DONE ? ' done-color' : ratio <= 0.1 ? ' danger' : ratio <= 0.2 ? ' warn' : '');
+        elTimer.classList.toggle('warn', ph !== PH_DONE && ratio <= 0.2 && ratio > 0.1);
+        elTimer.classList.toggle('danger', ph !== PH_DONE && ratio <= 0.1);
+        elLoop.textContent = ph >= 0 ? 'Boucle ' + S.loop + ' / ' + S.loops : '';
+        if (S.running) { btnStart.textContent = 'Pause'; btnStart.className = 'co-action pause'; btnStart.disabled = false; }
+        else if (ph === PH_DONE) { btnStart.textContent = 'Termine'; btnStart.className = 'co-action reset'; btnStart.disabled = true; }
+        else { btnStart.textContent = ph >= 0 ? 'Reprendre' : 'Lancer'; btnStart.className = 'co-action start'; btnStart.disabled = false; }
+        elLoops.value = S.loops;
+        elExDur.value = S.durEx;
+        elDbDur.value = S.durDb;
 
-        if (ph >= 0) {
-          elLoop.textContent = 'Boucle ' + state.currentLoop + ' / ' + state.totalLoops;
-        } else {
-          elLoop.textContent = '';
-        }
-
-        if (state.running) {
-          btnStart.textContent = 'Pause';
-          btnStart.className = 'co-btn stop';
-          btnStart.disabled = false;
-        } else if (ph === PHASE_DONE) {
-          btnStart.textContent = 'Termine';
-          btnStart.className = 'co-btn';
-          btnStart.disabled = true;
-        } else {
-          btnStart.textContent = ph >= 0 ? 'Reprendre' : 'Lancer';
-          btnStart.className = 'co-btn go';
-          btnStart.disabled = false;
-        }
-
-        elLoopsInp.value = state.totalLoops;
+        // Tab title: show timer when running
+        const mm = String(Math.floor(rem / 60)).padStart(2, '0');
+        const ss = String(rem % 60).padStart(2, '0');
+        if (S.running) document.title = mm + ':' + ss + ' ' + PH_NAME[ph] + ' — Chrono ECOS';
+        else if (ph === PH_DONE) document.title = 'Termine — Chrono ECOS';
+        else document.title = _origTitle;
       }
 
-      function startLocalTick() {
-        stopLocalTick();
-        iAmDriver = true;
-        localInterval = setInterval(() => {
-          if (!state.running || destroyed) return;
-          state.remaining--;
-          if (state.remaining < 0) {
-            if (state.phase === PHASE_EX) {
-              state.phase = PHASE_DB;
-              state.remaining = PHASE_DUR[1];
+      // ── Audio ──
+      let _actx = null;
+      function audioCtx() { if (!_actx) _actx = new (window.AudioContext || window.webkitAudioContext)(); if (_actx.state === 'suspended') _actx.resume(); return _actx; }
+      function beep(freq = 880, dur = 180) {
+        try { const ctx = audioCtx(), t = ctx.currentTime, osc = ctx.createOscillator(), gain = ctx.createGain(); osc.type = 'square'; osc.frequency.value = freq; gain.gain.setValueAtTime(0.7, t); gain.gain.exponentialRampToValueAtTime(0.001, t + dur / 1000); osc.connect(gain); gain.connect(ctx.destination); osc.start(t); osc.stop(t + dur / 1000 + 0.02); } catch {}
+      }
+      function beepSeq(n, freq = 800, gap = 380) { for (let i = 0; i < n; i++) setTimeout(() => beep(freq, 250), i * gap); }
+      function countdown5() { [600,560,520,480,1050].forEach((f, i) => setTimeout(() => beep(f, i === 4 ? 350 : 120), i * 1000)); }
+      function speak(text) { if (!('speechSynthesis' in window)) return; window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'fr-FR'; window.speechSynthesis.speak(u); }
+      let _warnPlayed = false, _cdPlayed = false;
+
+      // ── Tick: pure local, Firestore writes ONLY on phase transitions ──
+      function startTick() {
+        stopTick(); _warnPlayed = false; _cdPlayed = false;
+        tickIv = setInterval(() => {
+          if (!S.running || dead) return;
+          const rem = liveRemaining();
+          if (rem === 60 && !_warnPlayed) { _warnPlayed = true; beep(1000, 400); }
+          if (rem === 5 && !_cdPlayed) { _cdPlayed = true; countdown5(); }
+          if (rem < 0) {
+            // Phase transition → snapshot + push
+            if (S.phase === PH_EX) {
+              S.phase = PH_DB; S.remaining = PH_DUR[1]; S.startedAt = Date.now();
+              beepSeq(2, 380); setTimeout(() => speak('Debrief'), 700);
+            } else if (S.loop >= S.loops) {
+              S.phase = PH_DONE; S.remaining = 0; S.running = false; S.startedAt = 0;
+              beepSeq(3, 600); setTimeout(() => speak('Termine, bien joue'), 900);
             } else {
-              if (state.currentLoop >= state.totalLoops) {
-                state.phase = PHASE_DONE;
-                state.remaining = 0;
-                state.running = false;
-              } else {
-                state.currentLoop++;
-                state.phase = PHASE_EX;
-                state.remaining = PHASE_DUR[0];
-              }
+              S.loop++; S.phase = PH_EX; S.remaining = PH_DUR[0]; S.startedAt = Date.now();
+              beepSeq(2, 800); setTimeout(() => speak('Entrainement'), 700);
             }
-            state.updatedAt = Date.now();
-            fsPut(state).catch(() => {});
+            _warnPlayed = false; _cdPlayed = false;
+            putState(S); // only Firestore write from tick
           }
           render();
-          if (state.remaining % 5 === 0) {
-            state.updatedAt = Date.now();
-            fsPut(state).catch(() => {});
-          }
         }, 1000);
       }
+      function stopTick() { if (tickIv) { clearInterval(tickIv); tickIv = null; } }
 
-      function stopLocalTick() {
-        if (localInterval) { clearInterval(localInterval); localInterval = null; }
-        iAmDriver = false;
-      }
-
-      function startPoll() {
-        pollInterval = setInterval(async () => {
-          if (destroyed) return;
-          try {
-            const remote = await fsGet();
-            if (!remote) return;
-            if (iAmDriver && state.running) {
-              syncDot.className = 'co-sync-dot on';
-              syncLabel.textContent = 'Connecte (pilote)';
-              return;
-            }
-            state = { ...remote };
-            if (state.running && !localInterval) startLocalTick();
-            if (!state.running) stopLocalTick();
-            syncDot.className = 'co-sync-dot on';
-            syncLabel.textContent = 'Connecte';
+      // ── Poll: picks up remote events (start/pause/reset/transition) ──
+      function startPoll() { pollIv = setInterval(async () => {
+        if (dead) return;
+        try {
+          const r = await getState(); if (!r) return;
+          if (r.ts > S.ts) {
+            const wasRunning = S.running; S = { ...r };
+            if (S.running && !wasRunning) startTick();
+            if (!S.running && wasRunning) stopTick();
             render();
-          } catch (_) {
-            syncDot.className = 'co-sync-dot off';
-            syncLabel.textContent = 'Hors ligne';
           }
-        }, 2000);
-      }
+        } catch {}
+        try { renderPresence(await fetchPresence()); } catch {}
+      }, 3000); }
 
+      // ── Controls: each action = snapshot + putState ──
       btnStart.addEventListener('click', async () => {
-        if (state.phase === PHASE_DONE) return;
-        if (state.running) {
-          state.running = false;
-          stopLocalTick();
+        audioCtx();
+        if (S.phase === PH_DONE) return;
+        if (S.running) {
+          S.remaining = Math.max(0, liveRemaining()); S.running = false; S.startedAt = 0;
+          stopTick();
         } else {
-          if (state.phase < 0) {
-            state.phase = PHASE_EX;
-            state.remaining = PHASE_DUR[0];
-            state.currentLoop = 1;
-            state.totalLoops = parseInt(elLoopsInp.value, 10) || 3;
-          }
-          state.running = true;
-          state.startedAt = Date.now();
-          startLocalTick();
+          if (S.phase < 0) { S.durEx = parseInt(elExDur.value,10)||8; S.durDb = parseInt(elDbDur.value,10)||3; applyDurations(); S.phase = PH_EX; S.remaining = PH_DUR[0]; S.loop = 1; S.loops = parseInt(elLoops.value, 10) || 3; speak("C'est parti"); }
+          S.running = true; S.startedAt = Date.now();
+          startTick();
         }
-        state.updatedAt = Date.now();
-        render();
-        try { await fsPut(state); } catch (_) {}
+        render(); await putState(S);
       });
-
       btnReset.addEventListener('click', async () => {
-        stopLocalTick();
-        state = { phase: -1, remaining: PHASE_DUR[0], running: false, currentLoop: 1, totalLoops: parseInt(elLoopsInp.value, 10) || 3, startedAt: 0, updatedAt: Date.now() };
-        btnStart.disabled = false;
-        render();
-        try { await fsPut(state); } catch (_) {}
+        stopTick();
+        const durEx = parseInt(elExDur.value, 10) || 8;
+        const durDb = parseInt(elDbDur.value, 10) || 3;
+        PH_DUR[0] = durEx * 60; PH_DUR[1] = durDb * 60;
+        S = { phase: -1, remaining: PH_DUR[0], running: false, loop: 1, loops: parseInt(elLoops.value, 10) || 3, startedAt: 0, ts: Date.now(), durEx, durDb };
+        btnStart.disabled = false; render(); await putState(S);
       });
+      $('#co-loop-m').addEventListener('click', () => { let v = parseInt(elLoops.value,10)-1; if(v<1)v=1; elLoops.value=v; if(S.phase<0)S.loops=v; });
+      $('#co-loop-p').addEventListener('click', () => { let v = parseInt(elLoops.value,10)+1; if(v>9)v=9; elLoops.value=v; if(S.phase<0)S.loops=v; });
 
-      ov.querySelector('#co-loop-minus').addEventListener('click', () => {
-        let v = parseInt(elLoopsInp.value, 10) - 1;
-        if (v < 1) v = 1;
-        elLoopsInp.value = v;
-        if (state.phase < 0) state.totalLoops = v;
-      });
-      ov.querySelector('#co-loop-plus').addEventListener('click', () => {
-        let v = parseInt(elLoopsInp.value, 10) + 1;
-        if (v > 9) v = 9;
-        elLoopsInp.value = v;
-        if (state.phase < 0) state.totalLoops = v;
-      });
+      // Duration steppers (only editable before start)
+      function stepDur(el, delta, min, max) { let v = parseInt(el.value,10)+delta; if(v<min)v=min; if(v>max)v=max; el.value=v; if(S.phase<0){ S.durEx=parseInt(elExDur.value,10)||8; S.durDb=parseInt(elDbDur.value,10)||3; applyDurations(); S.remaining=PH_DUR[0]; render(); } }
+      $('#co-ex-m').addEventListener('click', () => stepDur(elExDur, -1, 1, 30));
+      $('#co-ex-p').addEventListener('click', () => stepDur(elExDur, 1, 1, 30));
+      $('#co-db-m').addEventListener('click', () => stepDur(elDbDur, -1, 1, 15));
+      $('#co-db-p').addEventListener('click', () => stepDur(elDbDur, 1, 1, 15));
 
-      ov.querySelector('#co-copy').addEventListener('click', () => {
+      // Toggle connections panel
+      $('#co-conn-toggle').addEventListener('click', () => elPanel.classList.toggle('open'));
+
+      // Copy room code
+      $('#co-room').addEventListener('click', () => navigator.clipboard.writeText(roomCode).catch(()=>{}));
+      $('#co-copy').addEventListener('click', () => {
         navigator.clipboard.writeText(roomCode).then(() => {
-          const b = ov.querySelector('#co-copy');
-          b.textContent = 'Copie !';
-          setTimeout(() => { b.textContent = 'Copier'; }, 1500);
+          const b = $('#co-copy'); b.textContent = 'Copie !'; setTimeout(() => { b.textContent = 'Copier le code'; }, 1500);
         });
       });
 
-      function destroy() {
-        destroyed = true;
-        stopLocalTick();
-        if (pollInterval) clearInterval(pollInterval);
-        ov.remove();
-      }
-      ov.querySelector('#co-close').addEventListener('click', destroy);
-      const onKey = e => { if (e.key === 'Escape') { destroy(); document.removeEventListener('keydown', onKey); } };
-      document.addEventListener('keydown', onKey);
+      // Close
+      function destroy() { dead = true; stopTick(); if (pollIv) clearInterval(pollIv); if (presIv) clearInterval(presIv); removePresence(); document.title = _origTitle; ov.remove(); }
+      $('#co-close').addEventListener('click', destroy);
+      const onK = e => { if (e.key === 'Escape') { destroy(); document.removeEventListener('keydown', onK); } };
+      document.addEventListener('keydown', onK);
 
+      // ── Boot ──
       render();
       (async () => {
+        await heartbeat();
+        presIv = setInterval(() => { if (!dead) heartbeat(); }, 8000);
         try {
-          const remote = await fsGet();
-          if (remote && remote.phase !== undefined && remote.updatedAt > 0) {
-            state = { ...remote };
-            if (state.running) startLocalTick();
-            syncDot.className = 'co-sync-dot on';
-            syncLabel.textContent = 'Connecte';
-          } else if (isNew) {
-            await fsPut(state);
-            syncDot.className = 'co-sync-dot on';
-            syncLabel.textContent = 'Session creee';
-          } else {
-            syncLabel.textContent = 'Session introuvable';
-          }
+          const remote = await getState();
+          if (remote && remote.ts > 0) { S = { ...remote }; if (S.running) startTick(); }
+          else await putState(S);
           render();
-        } catch (e) {
-          syncLabel.textContent = 'Erreur';
-        }
+        } catch {}
+        try { renderPresence(await fetchPresence()); } catch {}
         startPoll();
       })();
-    }
-
-    function genRoomCode() {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      let code = '';
-      for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-      return code;
     }
 
     document.getElementById('btn-ecos-random')?.addEventListener('click', async () => {
