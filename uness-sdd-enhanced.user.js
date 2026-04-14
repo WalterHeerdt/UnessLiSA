@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      14.0
-// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS + Point rouge ECOS + Filtre ECOS + Checkbox station faite + Notation /5 + Haptics mobile + ECOS Scoring Panel + Performance globale + Historique par matière
+// @version      14.2
+// @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS + Point rouge ECOS + Filtre ECOS + Checkbox station faite + Notation /5 + Haptics mobile + ECOS Scoring Panel + Performance globale + Historique par matière + Chrono partage
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
 // @match        https://livret.uness.fr/lisa/2025/Cat*gorie:Situation_de_d*part
@@ -497,7 +497,8 @@
   }
   function cssVarsRoot() {
     return `
-      :root {
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap');
+            :root {
         --bg:#f1f5f9; --surface:#ffffff; --surface2:#f8fafc;
         --border:#e2e8f0; --border2:#cbd5e1;
         --text:#0f172a; --text2:#334155; --muted:#94a3b8;
@@ -612,9 +613,9 @@
     if (!username) { username = (prompt('Cloud — nom d\'utilisateur :') || '').trim(); if (!username) return null; setCloudUsername(username); }
     if (!pin) {
       let pinOk = false;
-      while (!pinOk) { pin = (prompt('Cloud — PIN (min. 6 caractères, stocké localement) :') || '').trim(); if (!pin) return null; if (pin.length >= 6) pinOk = true; else alert('⚠️ PIN trop court — minimum 6 caractères requis par Firebase.'); }
+      while (!pinOk) { pin = (prompt('Cloud — PIN (min. 6 caractères, stocké localement) :') || '').trim(); if (!pin) return null; if (pin.length >= 6) pinOk = true; else alert('PIN trop court — minimum 6 caractères requis par Firebase.'); }
       setCloudPin(pin);
-    } else if (pin.length < 6) { setCloudPin(''); pin = ''; alert('⚠️ Ton PIN stocké est trop court (min. 6 car.). Saisis-en un nouveau.'); return cloudEnsureSession(); }
+    } else if (pin.length < 6) { setCloudPin(''); pin = ''; alert('Ton PIN stocké est trop court (min. 6 car.). Saisis-en un nouveau.'); return cloudEnsureSession(); }
     let tok = await cloudRefreshIfNeeded();
     if (!tok?.idToken) { await cloudSignInOrSignUp(username, pin); tok = await cloudRefreshIfNeeded(); }
     return tok?.idToken ? tok : null;
@@ -734,7 +735,7 @@
   }
   function communityLoadingHTML() { return `<div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:var(--fs-small)"><div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0"></div>Chargement de la synthèse communautaire…</div>`; }
   function communityEmptyHTML() { return `<p style="color:var(--muted);font-size:var(--fs-small);font-style:italic;margin:0">Pas encore assez de notes pour générer une synthèse.</p>`; }
-  function communityErrorHTML(msg) { return `<p style="color:var(--danger);font-size:var(--fs-small);margin:0">⚠ Erreur : ${escapeHtml(msg)}</p>`; }
+  function communityErrorHTML(msg) { return `<p style="color:var(--danger);font-size:var(--fs-small);margin:0">Erreur : ${escapeHtml(msg)}</p>`; }
 
   // ══════════════════════════════════════════════════════════════════════════
   // DEBUG
@@ -817,7 +818,7 @@
     document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8fafc;flex-direction:column;gap:14px;font-family:sans-serif;"><div style="width:36px;height:36px;border:3px solid #e2e8f0;border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite;"></div><p style="color:#94a3b8;font-size:14px;letter-spacing:.3px;">Chargement…</p><style>@keyframes spin{to{transform:rotate(360deg)}}</style></div>`;
   }
   function showError(e) {
-    document.body.innerHTML = `<div style="padding:40px;font-family:sans-serif;background:#f8fafc;min-height:100vh;max-width:600px;margin:0 auto"><div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:12px;padding:20px;margin-top:40px"><h2 style="color:#991b1b;font-size:16px;font-weight:600;margin-bottom:8px">⚠ Erreur de chargement</h2><p style="color:#7f1d1d;font-size:14px;">${escapeHtml(e?.message || String(e))}</p></div><p style="margin-top:16px;color:#64748b;font-size:13px;">Vérifiez que vous êtes connecté à LISA, puis rechargez la page.</p></div>`;
+    document.body.innerHTML = `<div style="padding:40px;font-family:sans-serif;background:#f8fafc;min-height:100vh;max-width:600px;margin:0 auto"><div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:12px;padding:20px;margin-top:40px"><h2 style="color:#991b1b;font-size:16px;font-weight:600;margin-bottom:8px">Erreur de chargement</h2><p style="color:#7f1d1d;font-size:14px;">${escapeHtml(e?.message || String(e))}</p></div><p style="margin-top:16px;color:#64748b;font-size:13px;">Vérifiez que vous êtes connecté à LISA, puis rechargez la page.</p></div>`;
   }
 
   async function buildListUI(items) {
@@ -915,6 +916,76 @@
       @keyframes spin{to{transform:rotate(360deg)}}
       #btn-ecos-random{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:color var(--transition),border-color var(--transition)}
       #btn-ecos-random:hover{color:#7c3aed;border-color:#7c3aed}
+
+      #btn-chrono{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--r);color:var(--muted);font-size:var(--fs-small);font-family:inherit;font-weight:var(--fw-med);cursor:pointer;transition:color var(--transition),border-color var(--transition)}
+      #btn-chrono:hover{color:#059669;border-color:#059669}
+
+      /* ── Chrono fullscreen overlay ── */
+      #chrono-overlay{position:fixed;inset:0;z-index:3000;background:#08080b;display:flex;flex-direction:column;font-family:var(--ff)}
+      #chrono-overlay *{box-sizing:border-box}
+      #chrono-overlay::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:.7}
+      #chrono-overlay>*{position:relative;z-index:1}
+      .co-glow{position:absolute;inset:0;z-index:0;transition:opacity .8s;pointer-events:none}
+      .co-glow.ex{background:radial-gradient(55% 55% at 50% 85%,rgba(99,102,241,.1) 0%,transparent 100%);opacity:1}
+      .co-glow.db{background:radial-gradient(55% 55% at 50% 85%,rgba(239,68,68,.09) 0%,transparent 100%);opacity:1}
+      .co-glow.dn{background:radial-gradient(55% 55% at 50% 85%,rgba(16,185,129,.09) 0%,transparent 100%);opacity:1}
+
+      .co-bar{display:flex;align-items:center;padding:16px 24px;gap:12px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06)}
+      .co-title{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#64748b}
+      .co-room{display:flex;align-items:center;gap:8px;margin-left:auto}
+      .co-room-code{font-family:ui-monospace,monospace;font-size:13px;font-weight:600;color:#a5b4fc;letter-spacing:1px;background:rgba(165,180,252,.08);padding:4px 12px;border-radius:6px;user-select:all}
+      .co-room-btn{padding:5px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#94a3b8;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}
+      .co-room-btn:hover{background:rgba(255,255,255,.08);color:#e2e8f0}
+      .co-close{padding:5px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#94a3b8;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;margin-left:8px}
+      .co-close:hover{background:rgba(239,68,68,.15);color:#fca5a5;border-color:rgba(239,68,68,.3)}
+
+      .co-center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 24px;min-height:0}
+      .co-phase{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;display:flex;align-items:center;gap:8px}
+      .co-phase .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+      .co-phase .dot.on{animation:co-blink 1.4s ease infinite}
+      @keyframes co-blink{0%,100%{opacity:1}50%{opacity:.2}}
+      .co-phase.ex{color:#a5b4fc} .co-phase.ex .dot{background:#818cf8}
+      .co-phase.db{color:#fca5a5} .co-phase.db .dot{background:#f87171}
+      .co-phase.dn{color:#6ee7b7} .co-phase.dn .dot{background:#34d399}
+      .co-phase.idle{color:#64748b} .co-phase.idle .dot{background:#475569}
+
+      .co-digits{font-family:'DM Mono',ui-monospace,monospace;font-size:clamp(100px,22vw,220px);font-weight:300;font-variant-numeric:tabular-nums;letter-spacing:-6px;line-height:1;color:#f1f5f9;transition:color .4s}
+      .co-digits.warn{color:#fbbf24}
+      .co-digits.danger{color:#f87171}
+      .co-digits.done-color{color:#34d399}
+
+      .co-loop{font-size:13px;font-weight:600;color:#475569;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+
+      .co-rail{width:min(600px,80vw);height:4px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+      .co-rail-fill{height:100%;border-radius:3px;transform-origin:left;transition:transform 1s linear,background .5s}
+      .co-rail-fill.ex{background:#818cf8}
+      .co-rail-fill.db{background:#f87171}
+      .co-rail-fill.dn{background:#34d399}
+
+      .co-footer{display:flex;align-items:center;justify-content:center;gap:12px;padding:20px 24px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.06)}
+      .co-loops-group{display:flex;align-items:center;gap:10px}
+      .co-loops-label{font-size:11px;color:#64748b;letter-spacing:.3px}
+      .co-stepper{display:flex;align-items:center;background:rgba(255,255,255,.05);border-radius:6px;overflow:hidden}
+      .co-stepper button{background:none;border:none;color:#64748b;font-size:17px;width:32px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .15s,background .15s}
+      .co-stepper button:hover{color:#e2e8f0;background:rgba(255,255,255,.08)}
+      .co-stepper input{font-family:ui-monospace,monospace;font-size:15px;font-weight:600;width:30px;text-align:center;background:none;border:none;color:#e2e8f0;padding:0;-moz-appearance:textfield}
+      .co-stepper input::-webkit-outer-spin-button,.co-stepper input::-webkit-inner-spin-button{-webkit-appearance:none}
+      .co-stepper input:focus{outline:none}
+
+      .co-btn{padding:12px 32px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#94a3b8;font-family:inherit;font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;cursor:pointer;transition:all .15s;min-width:120px}
+      .co-btn:hover{background:rgba(255,255,255,.08);color:#e2e8f0}
+      .co-btn.go{background:#4f46e5;border-color:#4f46e5;color:#fff}
+      .co-btn.go:hover{background:#4338ca}
+      .co-btn.stop{background:#ef4444;border-color:#ef4444;color:#fff}
+      .co-btn.stop:hover{background:#dc2626}
+      .co-btn:disabled{opacity:.35;pointer-events:none}
+
+      .co-sync{display:flex;align-items:center;gap:6px;position:absolute;bottom:20px;right:24px}
+      .co-sync-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+      .co-sync-dot.on{background:#34d399}
+      .co-sync-dot.off{background:#475569}
+      .co-sync-label{font-size:9px;color:#475569;letter-spacing:.3px}
+      .co-users{font-size:9px;color:#64748b;letter-spacing:.3px;margin-left:8px}
       #ecos-preview-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
       #ecos-preview-panel{width:min(1200px,96vw);height:92vh;background:#fff;border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
       #ecos-preview-head{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:var(--fs-small);font-weight:var(--fw-semi);color:var(--text);flex-shrink:0;background:#fff;flex-wrap:wrap}
@@ -986,7 +1057,7 @@
     document.body.innerHTML = '';
 
     const hdr = document.createElement('header');
-    hdr.innerHTML = `<div class="h-badge">LISA 2025</div><h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1><button id="btn-stats" title="Statistiques &amp; progression">📊 Stats</button>${cloudEnabled() ? '<button id="btn-ecos-random" title="Station ECOS aléatoire parmi les SDD visibles">🎲 ECOS</button>' : ''}<a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
+    hdr.innerHTML = `<div class="h-badge">LISA 2025</div><h1>Situations de Départ <span id="hdr-total">${items.length} SDD</span></h1><button id="btn-stats" title="Statistiques &amp; progression">Stats</button>${cloudEnabled() ? '<button id="btn-ecos-random" title="Station ECOS aleatoire parmi les SDD visibles">ECOS aleatoire</button>' : ''}${cloudEnabled() ? '<button id="btn-chrono" title="Chrono partage en session">Chrono</button>' : ''}<a class="h-back" href="/lisa/2025/Accueil">← Accueil</a>${cloudEnabled() ? '<button class="btn-logout" id="btn-logout" title="Se déconnecter du cloud sync">⊗</button>' : ''}`;
     document.body.appendChild(hdr);
 
     const ctrl = document.createElement('div');
@@ -1009,7 +1080,7 @@
         <button data-s="chrono">Récent</button>
       </div>
       <span id="stats"></span>
-      <button id="btn-rf" title="Vider le cache et recharger la liste">↺</button>`;
+      <button id="btn-rf" title="Vider le cache et recharger la liste">Reset</button>`;
     document.body.appendChild(ctrl);
 
     const main = document.createElement('main');
@@ -1184,7 +1255,7 @@
       }
       const backdrop = document.createElement('div');
       backdrop.id = 'stats-backdrop';
-      backdrop.innerHTML = `<div id="stats-panel"><div id="stats-panel-head">📊 Statistiques &amp; Progression<button id="stats-close" title="Fermer">✕</button></div><div id="stats-panel-body"><div class="stats-counters"><div class="stat-box"><div class="stat-box-val" style="color:var(--success)">${doneCount}</div><div class="stat-box-lbl">Faites</div></div><div class="stat-box"><div class="stat-box-val" style="color:#fb923c">${inpCount}</div><div class="stat-box-lbl">En cours</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--muted)">${total - doneCount - inpCount}</div><div class="stat-box-lbl">À faire</div></div><div class="stat-box"><div class="stat-box-val">${Math.round(doneCount / total * 100)}%</div><div class="stat-box-lbl">Progression</div></div><div class="stat-box"><div class="stat-box-val" style="color:#d97706">${reviewDue}</div><div class="stat-box-lbl">À réviser</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--ac)">${total}</div><div class="stat-box-lbl">Total SDD</div></div></div><div class="stats-streak"><div class="streak-fire">🔥</div><div><div class="streak-val">${streak} jour${streak !== 1 ? 's' : ''}</div><div class="streak-lbl">Streak actuel</div></div></div><div><div class="stats-section-title">Heatmap — 12 derniers mois</div>${heatHTML}</div><div><div class="stats-section-title">Progression par spécialité</div>${barsHTML}</div><div id="ecos-scores-section"><div class="stats-section-title">Notes ECOS par matière</div><div id="ecos-scores-content" style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px"><div style="width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite"></div>Chargement…</div></div></div></div>`;
+      backdrop.innerHTML = `<div id="stats-panel"><div id="stats-panel-head">Statistiques &amp; Progression<button id="stats-close" title="Fermer">✕</button></div><div id="stats-panel-body"><div class="stats-counters"><div class="stat-box"><div class="stat-box-val" style="color:var(--success)">${doneCount}</div><div class="stat-box-lbl">Faites</div></div><div class="stat-box"><div class="stat-box-val" style="color:#fb923c">${inpCount}</div><div class="stat-box-lbl">En cours</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--muted)">${total - doneCount - inpCount}</div><div class="stat-box-lbl">À faire</div></div><div class="stat-box"><div class="stat-box-val">${Math.round(doneCount / total * 100)}%</div><div class="stat-box-lbl">Progression</div></div><div class="stat-box"><div class="stat-box-val" style="color:#d97706">${reviewDue}</div><div class="stat-box-lbl">À réviser</div></div><div class="stat-box"><div class="stat-box-val" style="color:var(--ac)">${total}</div><div class="stat-box-lbl">Total SDD</div></div></div><div class="stats-streak"><div class="streak-fire"></div><div><div class="streak-val">${streak} jour${streak !== 1 ? 's' : ''}</div><div class="streak-lbl">Streak actuel</div></div></div><div><div class="stats-section-title">Heatmap — 12 derniers mois</div>${heatHTML}</div><div><div class="stats-section-title">Progression par spécialité</div>${barsHTML}</div><div id="ecos-scores-section"><div class="stats-section-title">Notes ECOS par matière</div><div id="ecos-scores-content" style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px"><div style="width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite"></div>Chargement…</div></div></div></div>`;
       document.body.appendChild(backdrop);
       backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
       backdrop.querySelector('#stats-close').addEventListener('click', () => backdrop.remove());
@@ -1228,7 +1299,7 @@
           container.innerHTML = html;
         }).catch(() => {
           const container = backdrop.querySelector('#ecos-scores-content');
-          if (container) container.innerHTML = '<p style="color:var(--danger);font-size:12px">⚠ Erreur de chargement</p>';
+          if (container) container.innerHTML = '<p style="color:var(--danger);font-size:12px">Erreur de chargement</p>';
         });
       } else {
         const container = backdrop.querySelector('#ecos-scores-content');
@@ -1237,6 +1308,327 @@
     }
 
     document.getElementById('btn-stats').addEventListener('click', buildStatsModal);
+
+
+    // ══════════════════════════════════════════════════════════════════
+    // CHRONO PARTAGE — overlay fullscreen + Firestore real-time sync
+    // ══════════════════════════════════════════════════════════════════
+    document.getElementById('btn-chrono')?.addEventListener('click', () => openChronoOverlay());
+
+    function openChronoOverlay() {
+      if (document.getElementById('chrono-overlay')) return;
+      if (!cloudEnabled()) { alert('Cloud sync requis pour le chrono partage.'); return; }
+
+      let roomCode = prompt('Code session chrono (laisser vide pour creer une nouvelle session) :');
+      if (roomCode === null) return;
+      roomCode = (roomCode || '').trim().toUpperCase();
+      const isNew = !roomCode;
+      if (isNew) roomCode = genRoomCode();
+
+      const ov = document.createElement('div');
+      ov.id = 'chrono-overlay';
+      ov.innerHTML = `
+        <div class="co-glow ex" id="co-glow"></div>
+        <div class="co-bar">
+          <span class="co-title">Chrono ECOS</span>
+          <div class="co-room">
+            <span class="co-room-code" id="co-code" title="Cliquer pour copier">${escapeHtml(roomCode)}</span>
+            <button class="co-room-btn" id="co-copy">Copier</button>
+            <button class="co-close" id="co-close">Fermer</button>
+          </div>
+        </div>
+        <div class="co-center">
+          <div class="co-phase idle" id="co-phase"><span class="dot"></span><span id="co-phase-text">Pret</span></div>
+          <div class="co-digits" id="co-digits">08:00</div>
+          <div class="co-loop" id="co-loop"></div>
+          <div class="co-rail"><div class="co-rail-fill ex" id="co-rail" style="transform:scaleX(1)"></div></div>
+        </div>
+        <div class="co-footer">
+          <div class="co-loops-group">
+            <span class="co-loops-label">Boucles</span>
+            <div class="co-stepper">
+              <button id="co-loop-minus">&minus;</button>
+              <input type="number" id="co-loops" value="3" min="1" max="9">
+              <button id="co-loop-plus">+</button>
+            </div>
+          </div>
+          <button class="co-btn go" id="co-start">Lancer</button>
+          <button class="co-btn" id="co-reset">Reset</button>
+        </div>
+        <div class="co-sync">
+          <span class="co-sync-dot off" id="co-sync-dot"></span>
+          <span class="co-sync-label" id="co-sync-label">Connexion...</span>
+        </div>
+      `;
+      document.body.appendChild(ov);
+
+      const elDigits   = ov.querySelector('#co-digits');
+      const elPhase    = ov.querySelector('#co-phase');
+      const elPhaseTxt = ov.querySelector('#co-phase-text');
+      const elRail     = ov.querySelector('#co-rail');
+      const elGlow     = ov.querySelector('#co-glow');
+      const elLoop     = ov.querySelector('#co-loop');
+      const elLoopsInp = ov.querySelector('#co-loops');
+      const btnStart   = ov.querySelector('#co-start');
+      const btnReset   = ov.querySelector('#co-reset');
+      const syncDot    = ov.querySelector('#co-sync-dot');
+      const syncLabel  = ov.querySelector('#co-sync-label');
+
+      const PHASE_EX = 0, PHASE_DB = 1, PHASE_DONE = 2;
+      const PHASE_DUR = [8 * 60, 3 * 60];
+      const PHASE_NAMES = ['Entrainement', 'Debriefing', 'Termine'];
+
+      let state = {
+        phase: -1, remaining: PHASE_DUR[0], running: false,
+        currentLoop: 1, totalLoops: 3,
+        startedAt: 0, updatedAt: 0
+      };
+      let localInterval = null;
+      let pollInterval = null;
+      let destroyed = false;
+      let iAmDriver = false;
+
+      const docPath = () => `${firestoreBase()}/chronoSessions/${roomCode}`;
+
+      async function fsGet() {
+        const tok = await cloudEnsureSession(); if (!tok) return null;
+        const r = await fetch(docPath(), { headers: { Authorization: 'Bearer ' + tok.idToken } });
+        if (r.status === 404) return null;
+        if (!r.ok) return null;
+        const j = await r.json();
+        return decodeState(j.fields || {});
+      }
+
+      async function fsPut(s) {
+        const tok = await cloudEnsureSession(); if (!tok) return;
+        await fetch(docPath(), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok.idToken },
+          body: JSON.stringify({ fields: encodeState(s) })
+        });
+      }
+
+      function encodeState(s) {
+        return {
+          phase:       { integerValue: String(s.phase) },
+          remaining:   { integerValue: String(s.remaining) },
+          running:     { booleanValue: !!s.running },
+          currentLoop: { integerValue: String(s.currentLoop) },
+          totalLoops:  { integerValue: String(s.totalLoops) },
+          startedAt:   { integerValue: String(s.startedAt || 0) },
+          updatedAt:   { integerValue: String(Date.now()) }
+        };
+      }
+
+      function decodeState(f) {
+        const gi = (k, def) => parseInt(f[k]?.integerValue ?? String(def), 10);
+        return {
+          phase:       gi('phase', -1),
+          remaining:   gi('remaining', PHASE_DUR[0]),
+          running:     f.running?.booleanValue === true,
+          currentLoop: gi('currentLoop', 1),
+          totalLoops:  gi('totalLoops', 3),
+          startedAt:   gi('startedAt', 0),
+          updatedAt:   gi('updatedAt', 0)
+        };
+      }
+
+      function render() {
+        const ph = state.phase;
+        const rem = Math.max(0, state.remaining);
+        const m = Math.floor(rem / 60), s = rem % 60;
+        elDigits.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+
+        const cls = ph === PHASE_EX ? 'ex' : ph === PHASE_DB ? 'db' : ph === PHASE_DONE ? 'dn' : 'idle';
+        elPhase.className = 'co-phase ' + cls;
+        elPhaseTxt.textContent = ph >= 0 && ph <= 2 ? PHASE_NAMES[ph] : 'Pret';
+        const dot = elPhase.querySelector('.dot');
+        dot.className = 'dot' + (state.running ? ' on' : '');
+
+        elGlow.className = 'co-glow ' + cls;
+
+        const total = ph >= 0 && ph < 2 ? PHASE_DUR[ph] : PHASE_DUR[0];
+        const pct = total > 0 ? rem / total : (ph === PHASE_DONE ? 0 : 1);
+        elRail.style.transform = 'scaleX(' + pct + ')';
+        elRail.className = 'co-rail-fill ' + cls;
+
+        const ratio = total > 0 ? rem / total : 1;
+        elDigits.className = 'co-digits' + (ph === PHASE_DONE ? ' done-color' : ratio <= 0.1 ? ' danger' : ratio <= 0.2 ? ' warn' : '');
+
+        if (ph >= 0) {
+          elLoop.textContent = 'Boucle ' + state.currentLoop + ' / ' + state.totalLoops;
+        } else {
+          elLoop.textContent = '';
+        }
+
+        if (state.running) {
+          btnStart.textContent = 'Pause';
+          btnStart.className = 'co-btn stop';
+          btnStart.disabled = false;
+        } else if (ph === PHASE_DONE) {
+          btnStart.textContent = 'Termine';
+          btnStart.className = 'co-btn';
+          btnStart.disabled = true;
+        } else {
+          btnStart.textContent = ph >= 0 ? 'Reprendre' : 'Lancer';
+          btnStart.className = 'co-btn go';
+          btnStart.disabled = false;
+        }
+
+        elLoopsInp.value = state.totalLoops;
+      }
+
+      function startLocalTick() {
+        stopLocalTick();
+        iAmDriver = true;
+        localInterval = setInterval(() => {
+          if (!state.running || destroyed) return;
+          state.remaining--;
+          if (state.remaining < 0) {
+            if (state.phase === PHASE_EX) {
+              state.phase = PHASE_DB;
+              state.remaining = PHASE_DUR[1];
+            } else {
+              if (state.currentLoop >= state.totalLoops) {
+                state.phase = PHASE_DONE;
+                state.remaining = 0;
+                state.running = false;
+              } else {
+                state.currentLoop++;
+                state.phase = PHASE_EX;
+                state.remaining = PHASE_DUR[0];
+              }
+            }
+            state.updatedAt = Date.now();
+            fsPut(state).catch(() => {});
+          }
+          render();
+          if (state.remaining % 5 === 0) {
+            state.updatedAt = Date.now();
+            fsPut(state).catch(() => {});
+          }
+        }, 1000);
+      }
+
+      function stopLocalTick() {
+        if (localInterval) { clearInterval(localInterval); localInterval = null; }
+        iAmDriver = false;
+      }
+
+      function startPoll() {
+        pollInterval = setInterval(async () => {
+          if (destroyed) return;
+          try {
+            const remote = await fsGet();
+            if (!remote) return;
+            if (iAmDriver && state.running) {
+              syncDot.className = 'co-sync-dot on';
+              syncLabel.textContent = 'Connecte (pilote)';
+              return;
+            }
+            state = { ...remote };
+            if (state.running && !localInterval) startLocalTick();
+            if (!state.running) stopLocalTick();
+            syncDot.className = 'co-sync-dot on';
+            syncLabel.textContent = 'Connecte';
+            render();
+          } catch (_) {
+            syncDot.className = 'co-sync-dot off';
+            syncLabel.textContent = 'Hors ligne';
+          }
+        }, 2000);
+      }
+
+      btnStart.addEventListener('click', async () => {
+        if (state.phase === PHASE_DONE) return;
+        if (state.running) {
+          state.running = false;
+          stopLocalTick();
+        } else {
+          if (state.phase < 0) {
+            state.phase = PHASE_EX;
+            state.remaining = PHASE_DUR[0];
+            state.currentLoop = 1;
+            state.totalLoops = parseInt(elLoopsInp.value, 10) || 3;
+          }
+          state.running = true;
+          state.startedAt = Date.now();
+          startLocalTick();
+        }
+        state.updatedAt = Date.now();
+        render();
+        try { await fsPut(state); } catch (_) {}
+      });
+
+      btnReset.addEventListener('click', async () => {
+        stopLocalTick();
+        state = { phase: -1, remaining: PHASE_DUR[0], running: false, currentLoop: 1, totalLoops: parseInt(elLoopsInp.value, 10) || 3, startedAt: 0, updatedAt: Date.now() };
+        btnStart.disabled = false;
+        render();
+        try { await fsPut(state); } catch (_) {}
+      });
+
+      ov.querySelector('#co-loop-minus').addEventListener('click', () => {
+        let v = parseInt(elLoopsInp.value, 10) - 1;
+        if (v < 1) v = 1;
+        elLoopsInp.value = v;
+        if (state.phase < 0) state.totalLoops = v;
+      });
+      ov.querySelector('#co-loop-plus').addEventListener('click', () => {
+        let v = parseInt(elLoopsInp.value, 10) + 1;
+        if (v > 9) v = 9;
+        elLoopsInp.value = v;
+        if (state.phase < 0) state.totalLoops = v;
+      });
+
+      ov.querySelector('#co-copy').addEventListener('click', () => {
+        navigator.clipboard.writeText(roomCode).then(() => {
+          const b = ov.querySelector('#co-copy');
+          b.textContent = 'Copie !';
+          setTimeout(() => { b.textContent = 'Copier'; }, 1500);
+        });
+      });
+
+      function destroy() {
+        destroyed = true;
+        stopLocalTick();
+        if (pollInterval) clearInterval(pollInterval);
+        ov.remove();
+      }
+      ov.querySelector('#co-close').addEventListener('click', destroy);
+      const onKey = e => { if (e.key === 'Escape') { destroy(); document.removeEventListener('keydown', onKey); } };
+      document.addEventListener('keydown', onKey);
+
+      render();
+      (async () => {
+        try {
+          const remote = await fsGet();
+          if (remote && remote.phase !== undefined && remote.updatedAt > 0) {
+            state = { ...remote };
+            if (state.running) startLocalTick();
+            syncDot.className = 'co-sync-dot on';
+            syncLabel.textContent = 'Connecte';
+          } else if (isNew) {
+            await fsPut(state);
+            syncDot.className = 'co-sync-dot on';
+            syncLabel.textContent = 'Session creee';
+          } else {
+            syncLabel.textContent = 'Session introuvable';
+          }
+          render();
+        } catch (e) {
+          syncLabel.textContent = 'Erreur';
+        }
+        startPoll();
+      })();
+    }
+
+    function genRoomCode() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+      return code;
+    }
 
     document.getElementById('btn-ecos-random')?.addEventListener('click', async () => {
       const btn = document.getElementById('btn-ecos-random');
@@ -1248,7 +1640,7 @@
       if (!pool.length) { alert('Aucune SDD avec ECOS dans la vue actuelle.'); return; }
       const sdd = pool[Math.floor(Math.random() * pool.length)];
       const origText = btn.textContent;
-      btn.textContent = '⏳'; btn.disabled = true;
+      btn.textContent = '...'; btn.disabled = true;
       try {
         const files = await loadEcosFiles(sdd.num);
         if (!files.length) { alert('Aucun fichier ECOS pour ' + sdd.name + '.'); return; }
@@ -1528,8 +1920,8 @@
         <div class="ecos-timer-display" id="timer-display">8:00</div>
         <div class="ecos-timer-bar"><div class="ecos-timer-bar-fill" id="timer-bar" style="width:100%"></div></div>
         <div class="ecos-timer-controls">
-          <button class="ecos-timer-btn primary" id="timer-start">▶ Démarrer</button>
-          <button class="ecos-timer-btn" id="timer-reset">↺ Reset</button>
+          <button class="ecos-timer-btn primary" id="timer-start">Demarrer</button>
+          <button class="ecos-timer-btn" id="timer-reset">Reset</button>
         </div>
       </div>
       <div class="ecos-notes-section">
@@ -1551,7 +1943,7 @@
       <div class="ecos-final-score" id="ecos-final-score">
         <div class="ecos-final-total"><span>Note station</span><span class="ecos-final-total-val" id="final-total">0 / 20</span></div>
         <div style="font-size:10px;color:var(--muted);margin-top:4px" id="final-matiere">${escapeHtml(matiere)}</div>
-        <button class="ecos-final-save" id="ecos-save-btn" disabled>💾 Enregistrer la note</button>
+        <button class="ecos-final-save" id="ecos-save-btn" disabled>Enregistrer la note</button>
       </div>`;
   }
 
@@ -1625,12 +2017,12 @@
       if (phase === PHASE_DONE) return;
       if (running) {
         clearInterval(timerInterval); running = false;
-        btnStart.textContent = '▶ Reprendre';
+        btnStart.textContent = 'Reprendre';
         btnStart.classList.add('primary');
         timerDot.className = 'phase-dot idle';
       } else {
         timerInterval = setInterval(tick, 1000); running = true;
-        btnStart.textContent = '⏸ Pause';
+        btnStart.textContent = 'Pause';
         btnStart.classList.remove('primary');
         haptic('selection');
       }
@@ -1640,7 +2032,7 @@
     btnReset.addEventListener('click', () => {
       clearInterval(timerInterval); running = false;
       phase = PHASE_ECOS; remaining = PHASE_DURATIONS[0];
-      btnStart.textContent = '▶ Démarrer'; btnStart.disabled = false; btnStart.classList.add('primary');
+      btnStart.textContent = 'Demarrer'; btnStart.disabled = false; btnStart.classList.add('primary');
       updateTimerUI();
     });
 
@@ -1706,13 +2098,13 @@
           date: new Date().toISOString(),
         });
         haptic('success');
-        saveBtn.textContent = '✓ Enregistré';
+        saveBtn.textContent = 'Enregistre';
         saveBtn.classList.add('saved');
-        setTimeout(() => { saveBtn.textContent = '💾 Enregistrer la note'; saveBtn.classList.remove('saved'); saveBtn.disabled = false; }, 2000);
+        setTimeout(() => { saveBtn.textContent = 'Enregistrer la note'; saveBtn.classList.remove('saved'); saveBtn.disabled = false; }, 2000);
       } catch (err) {
         console.error('[ECOS Score Save]', err);
-        saveBtn.textContent = '⚠ Erreur'; saveBtn.disabled = false;
-        setTimeout(() => { saveBtn.textContent = '💾 Enregistrer la note'; }, 2000);
+        saveBtn.textContent = 'Erreur'; saveBtn.disabled = false;
+        setTimeout(() => { saveBtn.textContent = 'Enregistrer la note'; }, 2000);
       }
     });
 
@@ -1746,7 +2138,7 @@
     const backdrop = document.createElement('div'); backdrop.id = 'ecos-preview-backdrop';
     backdrop.innerHTML = `<div id="ecos-preview-panel">
       <div id="ecos-preview-head">
-        <span class="pv-title" title="${escapeHtml(file?.name || '')}">📄 ${escapeHtml(file?.name || 'Document')}${escapeHtml(sizeMB)}</span>
+        <span class="pv-title" title="${escapeHtml(file?.name || '')}">${escapeHtml(file?.name || 'Document')}${escapeHtml(sizeMB)}</span>
         <div id="ecos-preview-rating">
           <span class="pr-star" data-star="1">★</span>
           <span class="pr-star" data-star="2">★</span>
@@ -1755,8 +2147,8 @@
           <span class="pr-star" data-star="5">★</span>
           <span class="pr-info">…</span>
         </div>
-        <a class="pv-btn" href="${escapeHtml(safeUrl)}" download="${escapeHtml(file?.name || 'document.pdf')}" target="_blank">⬇ Télécharger</a>
-        ${canDelete ? `<button class="pv-del" id="pv-del-btn">✕ Supprimer</button>` : ''}
+        <a class="pv-btn" href="${escapeHtml(safeUrl)}" download="${escapeHtml(file?.name || 'document.pdf')}" target="_blank">Telecharger</a>
+        ${canDelete ? `<button class="pv-del" id="pv-del-btn">Supprimer</button>` : ''}
         <button class="pv-close" id="ecos-preview-close" title="Fermer (Echap)">✕</button>
       </div>
       <div id="ecos-preview-split">
@@ -1817,7 +2209,7 @@
         cleanup();
         backdrop.remove();
         if (onDelete) onDelete(file.id);
-      } catch (err) { alert('Erreur : ' + err.message); btn.textContent = '✕ Supprimer'; btn.disabled = false; }
+      } catch (err) { alert('Erreur : ' + err.message); btn.textContent = 'Supprimer'; btn.disabled = false; }
     });
 
     const close = () => { cleanup(); backdrop.remove(); };
@@ -2066,7 +2458,7 @@
       const currentUid = tok?.uid || '';
       let files = [];
       try { files = await loadEcosFiles(sddN); }
-      catch (e) { const errP = document.createElement('p'); errP.style.cssText = 'color:var(--danger);font-size:12px;margin:0 0 10px'; errP.textContent = '⚠ ' + e.message; body.appendChild(errP); }
+      catch (e) { const errP = document.createElement('p'); errP.style.cssText = 'color:var(--danger);font-size:12px;margin:0 0 10px'; errP.textContent = '' + e.message; body.appendChild(errP); }
       const listWrap = renderFileList(files, currentUid);
       body.appendChild(listWrap);
       if (cloudEnabled()) { const uploadWrap = buildUploadZone(currentUid); body.appendChild(uploadWrap); }
@@ -2448,7 +2840,7 @@
         const result = await callFunction('explainAttendant', { sddN, sddName, attId, attText });
         panel.innerHTML = communityMarkdownToHtml(result.explanation || '');
         showPanel();
-      } catch (err) { panel.innerHTML = '<p style="color:var(--danger);font-size:var(--fs-small)">⚠ ' + escapeHtml(err.message) + '</p>'; showPanel(); }
+      } catch (err) { panel.innerHTML = '<p style="color:var(--danger);font-size:var(--fs-small)">' + escapeHtml(err.message) + '</p>'; showPanel(); }
       finally { btn.classList.remove('loading'); }
     });
 
