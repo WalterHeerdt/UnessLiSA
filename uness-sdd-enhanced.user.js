@@ -192,6 +192,9 @@
   const CACHE_TS  = 'uness_sdd_ts_v5';
   const CACHE_TTL = CFG.cacheTTLms;
 
+  let refreshListUI = null;
+  let refreshSddAfterCloudSync = null;
+
   // ══════════════════════════════════════════════════════════════════════════
   // STOCKAGE LOCAL
   // ══════════════════════════════════════════════════════════════════════════
@@ -656,6 +659,17 @@
   let _pushTimer = null;
   function cloudSchedulePush() { if (!cloudEnabled()) return; clearTimeout(_pushTimer); _pushTimer = setTimeout(async () => { try { await cloudPush(exportLocalState()); } catch (_) {} }, CFG.cloud.pushDebounceMs || 900); }
 
+  async function cloudPullIfAvailableAsync(onSync) {
+    if (!cloudEnabled()) return;
+    try {
+      const syncData = await cloudPull();
+      if (syncData) {
+        importLocalState(syncData);
+        if (typeof onSync === 'function') onSync();
+      }
+    } catch (_) {}
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // COMMUNITY NOTES
   // ══════════════════════════════════════════════════════════════════════════
@@ -769,8 +783,9 @@
   if (isList) {
     showLoading();
     try {
-      if (cloudEnabled()) { try { const r = await cloudPull(); if (r) importLocalState(r); } catch (_) {} }
-      buildListUI(await getData());
+      const items = await getData();
+      buildListUI(items);
+      if (cloudEnabled()) cloudPullIfAvailableAsync(() => { if (typeof refreshListUI === 'function') refreshListUI(); });
     } catch (e) { showError(e); }
   } else if (isSDD) {
     redesignSDDPage();
@@ -1112,6 +1127,15 @@
       _dd.set(item.num, s !== 'todo' ? (getDoneDate(item.num) || '') : '');
       _rv.set(item.num, s === 'done' ? isDueForReview(item.num) : false);
     }
+    refreshListUI = () => {
+      for (const item of items) {
+        const s = getStatus(item.num);
+        _st.set(item.num, s);
+        _dd.set(item.num, s !== 'todo' ? (getDoneDate(item.num) || '') : '');
+        _rv.set(item.num, s === 'done' ? isDueForReview(item.num) : false);
+      }
+      render();
+    };
     const snapStatus    = (n) => _st.get(n) || 'todo';
     const snapDoneDate  = (n) => _dd.get(n) || '';
     const snapDueReview = (n) => !!_rv.get(n);
@@ -1868,7 +1892,10 @@
     document.head.appendChild(style);
 
     async function bootSDD() {
-      if (cloudEnabled()) { try { const r = await cloudPull(); if (r) importLocalState(r); } catch (_) {} communityMigrateIfNeeded().catch(() => {}); }
+      if (cloudEnabled()) {
+        cloudPullIfAvailableAsync(() => { if (typeof refreshSddAfterCloudSync === 'function') refreshSddAfterCloudSync(); });
+        communityMigrateIfNeeded().catch(() => {});
+      }
       let attempts = 0;
       const tryBuild = () => { attempts++; if (document.querySelectorAll('.navbox table').length) buildSDD(); else if (attempts < 50) setTimeout(tryBuild, 100); else buildSDD(); };
       tryBuild();
@@ -2760,6 +2787,19 @@
         clearTimeout(_saveTimer);
         _saveTimer = setTimeout(saveNow, CFG.autosaveDelay);
       }
+
+      refreshSddAfterCloudSync = () => {
+        const currentStatus = getStatus(sddN);
+        applyStatus(currentStatus);
+        if (editor) {
+          try {
+            const syncedMd = getNotes(sddN) || '';
+            if (typeof editor.getMarkdown === 'function' && editor.getMarkdown() !== syncedMd) {
+              editor.setMarkdown(syncedMd);
+            }
+          } catch (_) {}
+        }
+      };
 
       const initialMd = getNotes(sddN) || '';
 
