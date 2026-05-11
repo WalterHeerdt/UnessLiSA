@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UNESS – SDD + ECOS
 // @namespace    http://tampermonkey.net/
-// @version      15
+// @version      18
 // @description  Liste SDD + redesign pages + notes Markdown + Cloud sync Firebase + Notes communautaires IA + Statut En cours + Date de complétion + Upload ECOS + Point rouge ECOS + Filtre ECOS + Checkbox station faite + Notation /5 + Haptics mobile + ECOS Scoring Panel + Performance globale + Historique par matière + Chrono partage
 // @author       You
 // @match        https://livret.uness.fr/lisa/2025/Cat%C3%A9gorie:Situation_de_d%C3%A9part
